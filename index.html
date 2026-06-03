@@ -5,14 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 
   <!-- ================= SEO ================= -->
-  <title>Project-feed - GitHub-powered project discovery feed</title>
-  <meta name="description" content="Project-feed is a Reddit-like platform for discovering and sharing projects powered by GitHub as a backend.">
-  <meta name="keywords" content="projects, github, feed, open source, developer, portfolio, project discovery">
+  <title>Project-feed</title>
+  <meta name="description" content="A simple project discovery feed platform powered by GitHub.">
+  <meta name="keywords" content="project, feed, github, open source, developer">
   <meta name="author" content="project-feed">
 
-  <!-- ================= Open Graph (SNS 공유) ================= -->
+  <!-- ================= Favicon ================= -->
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+
+  <!-- ================= Open Graph ================= -->
   <meta property="og:title" content="Project-feed">
-  <meta property="og:description" content="A GitHub-powered project discovery feed platform.">
+  <meta property="og:description" content="A simple project discovery feed platform.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://project-feed.github.io">
   <meta property="og:image" content="https://project-feed.github.io/assets/social_media_preview.png">
@@ -20,103 +23,82 @@
   <!-- ================= Twitter Card ================= -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Project-feed">
-  <meta name="twitter:description" content="Discover and share projects powered by GitHub.">
-  <meta name="twitter:image" content="https://project-feed.github.io/og-image.png">
+  <meta name="twitter:description" content="Discover projects in a simple feed.">
+  <meta name="twitter:image" content="https://project-feed.github.io/assets/social_media_preview.png">
 
-  <!-- ================= Fonts ================= -->
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Cascadia+Mono:wght@600&display=swap" rel="stylesheet">
-
-  <!-- ================= Styles ================= -->
+  <!-- ================= Style ================= -->
   <style>
-    :root {
-      --bg: #0B0D10;
-      --card: #11151B;
-      --border: #232A33;
-      --text: #E6EAF0;
-      --muted: #8B95A1;
-      --blue: #4DA3FF;
-      --green: #7CFFB2;
-      --red: #FF5C7A;
-    }
-
     body {
       margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'JetBrains Mono', monospace;
+      background: white;
+      color: black;
+      font-family: monospace;
     }
 
     header {
-      padding: 24px;
-      border-bottom: 1px solid var(--border);
+      border-bottom: 2px solid black;
+      padding: 20px;
     }
 
     .logo {
       display: flex;
       align-items: center;
-      gap: 12px;
-    }
-
-    .mark {
-      width: 28px;
-      height: 28px;
-      background: linear-gradient(to bottom, white, black);
-      clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+      gap: 10px;
     }
 
     .title {
-      font-family: 'Cascadia Mono', monospace;
-      font-size: 20px;
-      font-weight: 600;
+      font-size: 22px;
+      font-weight: bold;
     }
 
     .subtitle {
       font-size: 12px;
-      color: var(--muted);
       margin-top: 4px;
     }
 
     .container {
-      max-width: 900px;
+      max-width: 800px;
       margin: 0 auto;
       padding: 20px;
     }
 
     .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      padding: 16px;
-      border-radius: 10px;
-      margin-bottom: 12px;
+      border: 2px solid black;
+      padding: 12px;
+      margin-bottom: 10px;
     }
 
     .card:hover {
-      border-color: var(--blue);
+      background: #f5f5f5;
     }
 
     .project-title {
-      font-family: 'Cascadia Mono', monospace;
-      font-size: 16px;
+      font-weight: bold;
       margin-bottom: 6px;
     }
 
     .meta {
       font-size: 12px;
-      color: var(--muted);
-      display: flex;
-      gap: 12px;
     }
 
     .tag {
-      color: var(--blue);
+      font-weight: bold;
     }
 
-    .footer {
+    footer {
+      border-top: 2px solid black;
+      padding: 20px;
       text-align: center;
-      color: var(--muted);
       font-size: 12px;
-      padding: 30px;
+      margin-top: 30px;
+    }
+
+    .mark {
+      width: 24px;
+      height: 24px;
+      background: linear-gradient(to bottom, white, black);
+      clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+      border: 2px solid black;
     }
   </style>
 </head>
@@ -125,10 +107,10 @@
 
 <header>
   <div class="logo">
-    <div class="mark"></div>
+    <img src="assets/icon.svg" width="24" height="24" alt="Project-feed icon">
     <div>
       <div class="title">Project-feed</div>
-      <div class="subtitle">A GitHub-powered project discovery feed</div>
+      <div class="subtitle">A simple GitHub-powered project feed</div>
     </div>
   </div>
 </header>
@@ -138,26 +120,29 @@
   <div class="card">
     <div class="project-title">Example Project</div>
     <div class="meta">
-      <span class="tag">#web</span>
-      <span>⭐ 12</span>
-      <span>🔥 trending</span>
+      <span class="tag">#web</span> · ⭐ 12 · trending
     </div>
   </div>
 
   <div class="card">
-    <div class="project-title">Another Project</div>
+    <div class="project-title">AI Tool Project</div>
     <div class="meta">
-      <span class="tag">#ai</span>
-      <span>⭐ 34</span>
-      <span>new</span>
+      <span class="tag">#ai</span> · ⭐ 34 · new
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="project-title">Open Source Library</div>
+    <div class="meta">
+      <span class="tag">#lib</span> · ⭐ 58 · hot
     </div>
   </div>
 
 </div>
 
-<div class="footer">
-  built with GitHub + Firebase · Project-feed
-</div>
+<footer>
+  Project-feed · GitHub Pages · MIT License
+</footer>
 
 </body>
 </html>
