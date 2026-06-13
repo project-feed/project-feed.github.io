@@ -1,148 +1,82 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 
   <!-- ================= SEO ================= -->
-  <title>Project-feed</title>
-  <meta name="description" content="A simple project discovery feed platform powered by GitHub.">
-  <meta name="keywords" content="project, feed, github, open source, developer">
+  <title>project_feed</title>
+  <meta name="description" content="프로젝트를 발견, 공유, 탐색하는 깃허브 기반의 개발자 피드 플랫폼">
+  <meta name="keywords" content="project, feed, github, open source, developer, firebase">
   <meta name="author" content="project-feed">
 
   <!-- ================= Favicon ================= -->
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
 
   <!-- ================= Open Graph ================= -->
-  <meta property="og:title" content="Project-feed">
-  <meta property="og:description" content="A simple project discovery feed platform.">
+  <meta property="og:title" content="project_feed">
+  <meta property="og:description" content="프로젝트를 발견, 공유, 탐색하는 개발자 피드 플랫폼.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://project-feed.github.io">
   <meta property="og:image" content="https://project-feed.github.io/assets/social_media_preview.png">
 
   <!-- ================= Twitter Card ================= -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Project-feed">
-  <meta name="twitter:description" content="Discover projects in a simple feed.">
+  <meta name="twitter:title" content="project_feed">
+  <meta name="twitter:description" content="프로젝트를 발견, 공유, 탐색하는 개발자 피드 플랫폼.">
   <meta name="twitter:image" content="https://project-feed.github.io/assets/social_media_preview.png">
 
-  <!-- ================= Style ================= -->
-  <style>
-    body {
-      margin: 0;
-      background: white;
-      color: black;
-      font-family: monospace;
-    }
+  <!-- ================= Style Sheet ================= -->
+  <link rel="stylesheet" href="style.css">
 
-    header {
-      border-bottom: 2px solid black;
-      padding: 20px;
-    }
-
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .title {
-      font-size: 22px;
-      font-weight: bold;
-    }
-
-    .subtitle {
-      font-size: 12px;
-      margin-top: 4px;
-    }
-
-    .container {
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 20px;
-    }
-
-    .card {
-      border: 2px solid black;
-      padding: 12px;
-      margin-bottom: 10px;
-    }
-
-    .card:hover {
-      background: #f5f5f5;
-    }
-
-    .project-title {
-      font-weight: bold;
-      margin-bottom: 6px;
-    }
-
-    .meta {
-      font-size: 12px;
-    }
-
-    .tag {
-      font-weight: bold;
-    }
-
-    footer {
-      border-top: 2px solid black;
-      padding: 20px;
-      text-align: center;
-      font-size: 12px;
-      margin-top: 30px;
-    }
-
-    .mark {
-      width: 24px;
-      height: 24px;
-      background: linear-gradient(to bottom, white, black);
-      clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
-      border: 2px solid black;
-    }
-  </style>
+  <!-- ================= External Libraries ================= -->
+  <!-- Marked.js for parsing markdown in descriptions -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 
 <body>
 
-<header>
-  <div class="logo">
-    <img src="assets/icon.svg" width="24" height="24" alt="Project-feed icon">
-    <div>
-      <div class="title">Project-feed</div>
-      <div class="subtitle">A simple GitHub-powered project feed</div>
+  <header>
+    <div class="header-container">
+      <a href="#/" class="logo" id="logo-link">
+        <img src="assets/icon.svg" class="logo-icon" alt="Project-feed logo">
+        <div class="logo-text">
+          <span class="logo-title">project_feed</span>
+          <span class="logo-subtitle">A simple GitHub-powered project feed</span>
+        </div>
+      </a>
+
+      <div class="nav-actions">
+        <nav>
+          <a href="#/" class="nav-link" id="nav-feed">Feed</a>
+          <a href="#/submit" class="nav-link" id="nav-submit">Submit</a>
+        </nav>
+        
+        <div id="user-nav-container" style="display: inline-flex; align-items: center; gap: 10px;">
+          <a href="#/login" class="nav-link" id="nav-login">Login</a>
+        </div>
+        
+        <button id="theme-toggle-btn" class="theme-toggle" aria-label="Toggle dark mode">
+          <span id="theme-icon">◇</span>
+          <span id="theme-text">DARK</span>
+        </button>
+      </div>
     </div>
-  </div>
-</header>
+  </header>
 
-<div class="container">
+  <main class="container" id="app">
+    <!-- Dynamic Content Loaded by app.js -->
+    <div class="loading">Loading database...</div>
+  </main>
 
-  <div class="card">
-    <div class="project-title">Example Project</div>
-    <div class="meta">
-      <span class="tag">#web</span> · ⭐ 12 · trending
+  <footer>
+    <div class="footer-container">
+      <p>&copy; 2026 <a href="#/">project_feed</a> · <a href="https://github.com/project-feed/project-feed.github.io" target="_blank" rel="noopener">GitHub Repository</a> · MIT License</p>
     </div>
-  </div>
+  </footer>
 
-  <div class="card">
-    <div class="project-title">AI Tool Project</div>
-    <div class="meta">
-      <span class="tag">#ai</span> · ⭐ 34 · new
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="project-title">Open Source Library</div>
-    <div class="meta">
-      <span class="tag">#lib</span> · ⭐ 58 · hot
-    </div>
-  </div>
-
-</div>
-
-<footer>
-  Project-feed · GitHub Pages · MIT License
-</footer>
+  <!-- ================= Application Entrypoint ================= -->
+  <script type="module" src="app.js"></script>
 
 </body>
 </html>

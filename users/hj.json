@@ -1,0 +1,8 @@
+{
+  "username": "hj",
+  "nickname": "HJ",
+  "avatar": "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150&h=150&fit=crop",
+  "bio": "안녕하세요. 유용한 개발 도구와 멋진 터미널 앱을 만드는 것을 좋아하는 개발자 HJ입니다.",
+  "joinedAt": "2026-06-02",
+  "projects": ["terminal-clock"]
+}

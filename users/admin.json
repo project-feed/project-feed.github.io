@@ -1,0 +1,8 @@
+{
+  "username": "admin",
+  "nickname": "Project-feed 관리자",
+  "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop",
+  "bio": "Project-feed를 개발하고 운영하고 있습니다. 오픈 소스 생태계와 파일 기반 아키텍처에 관심이 많습니다.",
+  "joinedAt": "2026-06-01",
+  "projects": ["project-feed", "neural-painter"]
+}

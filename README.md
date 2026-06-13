@@ -1,2 +1,2 @@
-# project-feed.github.io
+# project_feed.github.io
 A GitHub-based project feed platform.
