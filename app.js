@@ -250,8 +250,6 @@ function updateUserHeaderUI() {
   }
 }
 
-}
-
 async function handleLogout() {
   try {
     await signOut(auth);
