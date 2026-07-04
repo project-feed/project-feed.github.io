@@ -1015,6 +1015,16 @@ function updateGeneratedJSON() {
   if (indexBox) indexBox.value = JSON.stringify(indexObj, null, 2) + ",";
 }
 
+function renderVerificationPendingPage() {
+  appContainer.innerHTML = `
+    <div class="error-msg">
+      <h3>이메일 인증 대기 중</h3>
+      <p>이메일 인증을 완료해야 서비스를 이용할 수 있습니다. 가입하신 이메일의 메일함을 확인해 주세요.</p>
+      <button class="btn" onclick="location.reload()" style="margin-top: 15px;">새로고침 (인증 확인)</button>
+    </div>
+  `;
+}
+
 // 5. 404 Page
 function render404() {
   appContainer.innerHTML = `
