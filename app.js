@@ -58,16 +58,26 @@ function toggleTheme() {
 }
 
 function updateThemeUI(theme) {
-  if (theme === "dark") {
-    themeIcon.textContent = "◆";
-    themeText.textContent = "LIGHT";
-  } else {
-    themeIcon.textContent = "◇";
-    themeText.textContent = "DARK";
+  const icon = document.getElementById("theme-icon");
+  const text = document.getElementById("theme-text");
+  
+  if (icon && text) {
+    if (theme === "dark") {
+      icon.textContent = "◆";
+      text.textContent = "LIGHT";
+    } else {
+      icon.textContent = "◇";
+      text.textContent = "DARK";
+    }
   }
 }
 
-themeToggleBtn.addEventListener("click", toggleTheme);
+// Add global listener for dynamic theme buttons
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#theme-toggle-btn")) {
+    toggleTheme();
+  }
+});
 
 // ==========================================================================
 // Data Manager (Fetching static JSON files)
@@ -222,19 +232,37 @@ function updateUserHeaderUI() {
 
     if (state.currentUser.emailVerified) {
       container.innerHTML = `
-        <a href="#/user/${escapeHTML(username)}" class="user-menu-btn" id="header-profile-link">
-          <img src="${escapeHTML(avatar)}" width="20" height="20">
-          <span>${escapeHTML(nickname)}</span>
-        </a>
-        <a href="#/profile/edit" class="nav-link" id="nav-edit-profile">Edit</a>
-        <button class="nav-link" id="logout-btn">Logout</button>
+        <div class="dropdown">
+          <a href="#/user/${escapeHTML(username)}" class="user-menu-btn" id="header-profile-link">
+            <img src="${escapeHTML(avatar)}" width="20" height="20">
+            <span>${escapeHTML(nickname)}</span>
+          </a>
+          <div class="dropdown-menu">
+            <a href="#/profile/edit" class="dropdown-item">Edit Profile</a>
+            <button class="dropdown-item" id="theme-toggle-btn">
+              <span id="theme-icon">◇</span> <span id="theme-text">DARK</span>
+            </button>
+            <button class="dropdown-item" id="logout-btn">Logout</button>
+          </div>
+        </div>
       `;
+      // Update theme UI immediately for the new button
+      updateThemeUI(document.documentElement.getAttribute("data-theme") || "light");
     } else {
       // Logged in but NOT verified
       container.innerHTML = `
         <span style="font-size: 11px; color: var(--accent-color);">[Pending Verification]</span>
-        <button class="nav-link" id="logout-btn">Logout</button>
+        <div class="dropdown">
+          <button class="user-menu-btn">Menu</button>
+          <div class="dropdown-menu">
+            <button class="dropdown-item" id="theme-toggle-btn">
+              <span id="theme-icon">◇</span> <span id="theme-text">DARK</span>
+            </button>
+            <button class="dropdown-item" id="logout-btn">Logout</button>
+          </div>
+        </div>
       `;
+      updateThemeUI(document.documentElement.getAttribute("data-theme") || "light");
     }
 
     // Bind logout
@@ -245,8 +273,17 @@ function updateUserHeaderUI() {
   } else {
     // Guest
     container.innerHTML = `
-      <a href="#/login" class="nav-link" id="nav-login">Login</a>
+      <div class="dropdown">
+        <button class="user-menu-btn">Guest</button>
+        <div class="dropdown-menu">
+          <a href="#/login" class="dropdown-item" id="nav-login">Login</a>
+          <button class="dropdown-item" id="theme-toggle-btn">
+            <span id="theme-icon">◇</span> <span id="theme-text">DARK</span>
+          </button>
+        </div>
+      </div>
     `;
+    updateThemeUI(document.documentElement.getAttribute("data-theme") || "light");
   }
 }
 
