@@ -81,6 +81,7 @@ header {
 .logo-icon {
   width: 28px;
   height: 28px;
+  flex-shrink: 0;
 }
 
 .logo-text {
@@ -102,45 +103,40 @@ header {
 .nav-actions {
   display: flex;
   align-items: center;
-  gap: 15px;
+  gap: 10px;
 }
 
-.nav-link {
+.nav-actions nav {
+  display: flex;
+  gap: 10px;
+}
+
+.nav-link, .theme-toggle, .user-menu-btn {
   color: var(--text-color);
+  background-color: transparent;
   text-decoration: none;
-  font-weight: 700;
-  padding: 6px 12px;
-  border: 2px solid transparent;
-  transition: all 0.15s ease;
-}
-
-.nav-link:hover {
-  border: 2px solid var(--border-color);
-  background-color: var(--hover-bg);
-  color: var(--hover-text);
-}
-
-.nav-link.active {
-  border: 2px solid var(--border-color);
-}
-
-.theme-toggle {
-  background: none;
-  border: 2px solid var(--border-color);
-  color: var(--text-color);
-  padding: 6px 12px;
   font-family: var(--font-family);
   font-weight: 700;
-  cursor: pointer;
-  display: flex;
+  font-size: 13px;
+  padding: 0 12px;
+  height: 36px;
+  border: 2px solid var(--border-color);
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.theme-toggle:hover {
+.nav-link:hover, .theme-toggle:hover, .user-menu-btn:hover {
   background-color: var(--hover-bg);
   color: var(--hover-text);
+}
+
+.nav-link.active, .theme-toggle.active {
+  background-color: var(--border-color);
+  color: var(--bg-color);
 }
 
 /* Container */
@@ -1035,29 +1031,11 @@ footer a:hover {
 }
 
 /* User Nav Dropdown / Status info in Header */
-.user-menu-btn {
-  background: none;
-  border: 2px solid var(--border-color);
-  color: var(--text-color);
-  padding: 6px 12px;
-  font-family: var(--font-family);
-  font-weight: 700;
-  cursor: pointer;
-  text-decoration: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.user-menu-btn:hover {
-  background-color: var(--hover-bg);
-  color: var(--hover-text);
-}
-
 .user-menu-btn img {
   border: 1px solid var(--border-color);
   object-fit: cover;
   filter: grayscale(100%);
+  border-radius: 50%;
 }
 
 .user-menu-btn:hover img {

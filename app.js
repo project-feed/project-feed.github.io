@@ -223,17 +223,17 @@ function updateUserHeaderUI() {
     if (state.currentUser.emailVerified) {
       container.innerHTML = `
         <a href="#/user/${escapeHTML(username)}" class="user-menu-btn" id="header-profile-link">
-          <img src="${escapeHTML(avatar)}" width="20" height="20" style="border-radius: 50%;">
+          <img src="${escapeHTML(avatar)}" width="20" height="20">
           <span>${escapeHTML(nickname)}</span>
         </a>
         <a href="#/profile/edit" class="nav-link" id="nav-edit-profile">Edit</a>
-        <button class="btn" id="logout-btn" style="padding: 4px 8px; font-size: 11px;">Logout</button>
+        <button class="nav-link" id="logout-btn">Logout</button>
       `;
     } else {
       // Logged in but NOT verified
       container.innerHTML = `
         <span style="font-size: 11px; color: var(--accent-color);">[Pending Verification]</span>
-        <button class="btn" id="logout-btn" style="padding: 4px 8px; font-size: 11px;">Logout</button>
+        <button class="nav-link" id="logout-btn">Logout</button>
       `;
     }
 
