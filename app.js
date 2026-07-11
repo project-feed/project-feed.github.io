@@ -120,6 +120,15 @@ async function fetchGraphQL(query, variables = {}) {
 
 async function loadInitialData() {
   try {
+// Ensure categories are loaded from custom JSON (projectCategories.json)
+    // This data defines the hierarchical categories used for filtering projects.
+    // It is independent of GitHub discussion categories.
+    // Example structure: [{id, name, subcategories: []}, ...]
+    const customCatData = await fetchJSON('projectCategories.json').catch(() => []);
+    state.customCategories = customCatData || [];
+    // Default filter values
+    state.selectedCustomCategory = 'ALL';
+    state.selectedCustomSubcategory = 'ALL';
     // Fetch discussions from the repository
     const query = `
       query($owner: String!, $name: String!) {
@@ -168,9 +177,17 @@ async function loadInitialData() {
     state.projectsCategory = state.discussionCategories.find(c => c.name.toLowerCase() === 'projects');
     state.usersCategory = state.discussionCategories.find(c => c.name.toLowerCase() === 'users');
 
-    // Transform Discussions into our project state format
     const discussions = data.repository.discussions.nodes || [];
+
     const mappedDiscussions = discussions.map(d => {
+      // Parse custom category and subcategory from discussion body (if present)
+      let customCategory = 'ALL';
+      let customSubcategory = 'ALL';
+      const categoryMatch = d.body.match(/^Category:\s*(.+)$/m);
+      if (categoryMatch) customCategory = categoryMatch[1].trim();
+      const subcatMatch = d.body.match(/^Subcategory:\s*(.+)$/m);
+      if (subcatMatch) customSubcategory = subcatMatch[1].trim();
+
       // Simple hashtag parsing for custom tags (e.g. #Web #Mobile)
       const hashtagRegex = /#([\w가-힣]+)/g;
       const foundTags = [...d.body.matchAll(hashtagRegex)].map(match => match[1]);
@@ -182,6 +199,8 @@ async function loadInitialData() {
         description: d.body.substring(0, 150) + (d.body.length > 150 ? '...' : ''), // Preview
         content: d.body,
         category: d.category.name,
+        customCategory,
+        customSubcategory,
         tags: uniqueTags,
         author: d.author.login,
         authorAvatar: d.author.avatarUrl,
@@ -519,8 +538,6 @@ function renderFeedPage() {
   });
 }
 
-// Render dynamic elements inside sidebar
-
 // 2. 로그인 페이지 렌더링
 function renderLoginPage() {
   appContainer.innerHTML = `
@@ -559,8 +576,117 @@ function renderLoginPage() {
   });
 }
 
+// 3. 프로젝트 제출 페이지 (Submit Page)
+function renderSubmitPage() {
+  // Ensure custom categories are loaded
+  if (!state.customCategories || state.customCategories.length === 0) {
+    loadInitialData().then(() => renderSubmitPage()).catch(err => {
+      appContainer.innerHTML = `<div class="error-msg" style="text-align:center; margin-top:50px;"><h3>카테고리 로드 실패</h3><p>${err.message}</p></div>`;
+    });
+    return;
+  }
+
+  // Build main category options
+  const customOptions = state.customCategories.map(cat => {
+    return `<option value="${escapeHTML(cat.name)}">${escapeHTML(cat.icon || '')} ${escapeHTML(cat.name)}</option>`;
+  }).join('');
+
+  // Get subcategories for first category by default
+  const firstCat = state.customCategories[0];
+  const firstSubOptions = (firstCat && firstCat.subcategories && firstCat.subcategories.length)
+    ? firstCat.subcategories.map(s => `<option value="${escapeHTML(s.name)}">${escapeHTML(s.name)}</option>`).join('')
+    : '<option value="">해당 없음</option>';
+
+  appContainer.innerHTML = `
+    <div class="submit-container">
+      <div class="submit-header">
+        <h2 class="submit-title">새 프로젝트 등록</h2>
+        <p class="submit-subtitle">등록한 프로젝트는 GitHub Discussions의 Projects 카테고리에 자동으로 생성됩니다.</p>
+      </div>
+      <form id="submit-form" class="submit-form">
+        <div class="form-row" style="display:flex; gap:16px;">
+          <div class="form-group" style="flex:1;">
+            <label class="form-label" for="custom-category-select">카테고리</label>
+            <select class="form-control" id="custom-category-select">${customOptions}</select>
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label class="form-label" for="custom-subcategory-select">세부 카테고리</label>
+            <select class="form-control" id="custom-subcategory-select">${firstSubOptions}</select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="project-title">프로젝트 이름</label>
+          <input type="text" class="form-control" id="project-title" placeholder="멋진 프로젝트 이름을 적어주세요." required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="proj-tags">태그 (쉼표로 구분)</label>
+          <input type="text" class="form-control" id="proj-tags" placeholder="예: React, Python, 오픈소스">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="project-body">프로젝트 설명 (Markdown 지원)</label>
+          <textarea class="form-control" id="project-body" rows="10" placeholder="# 프로젝트 개요&#10;&#10;상세한 설명을 마크다운으로 작성해주세요." required></textarea>
+        </div>
+        <button type="submit" class="btn" id="submit-btn" style="width:100%; height:48px; font-size:16px; margin-top:8px;">게시하기</button>
+        <div id="submit-error" class="error-msg" style="margin-top:12px;"></div>
+      </form>
+    </div>
+  `;
+
+  // Update subcategory options when main category changes
+  const catSelect = document.getElementById('custom-category-select');
+  const subSelect = document.getElementById('custom-subcategory-select');
+  catSelect.addEventListener('change', () => {
+    const selected = state.customCategories.find(c => c.name === catSelect.value);
+    if (selected && selected.subcategories && selected.subcategories.length) {
+      subSelect.innerHTML = selected.subcategories.map(s => `<option value="${escapeHTML(s.name)}">${escapeHTML(s.name)}</option>`).join('');
+    } else {
+      subSelect.innerHTML = '<option value="">해당 없음</option>';
+    }
+  });
+
+  document.getElementById('submit-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const title = document.getElementById('project-title').value.trim();
+    const body = document.getElementById('project-body').value.trim();
+    const tags = document.getElementById('proj-tags').value.trim();
+    const selectedCustomCategory = catSelect.value;
+    const selectedSubcategory = subSelect.value;
+    const errorDiv = document.getElementById('submit-error');
+    const btn = document.getElementById('submit-btn');
+    errorDiv.textContent = '';
+
+    if (!title || !body) {
+      errorDiv.textContent = "제목과 설명을 모두 입력해주세요.";
+      return;
+    }
+    if (!state.projectsCategory) {
+      errorDiv.textContent = "Projects 카테고리를 찾을 수 없습니다.";
+      return;
+    }
+
+    // Build body: prepend Category metadata, append hashtags
+    let finalBody = `Category: ${selectedCustomCategory}\nSubcategory: ${selectedSubcategory}\n\n${body}`;
+    if (tags) {
+      const hashtagStr = tags.split(',').map(t => '#' + t.trim()).join(' ');
+      finalBody += `\n\n---\n${hashtagStr}`;
+    }
+
+    try {
+      btn.textContent = "게시 중...";
+      btn.disabled = true;
+      const discussionNumber = await createDiscussion(state.projectsCategory.id, title, finalBody);
+      state.projects = []; // clear cache
+      window.location.hash = `#/project/${discussionNumber}`;
+    } catch (err) {
+      errorDiv.textContent = "등록 실패: " + err.message;
+      btn.textContent = "게시하기";
+      btn.disabled = false;
+    }
+  });
+}
+
 // ==========================================================================
-// Page Renderers
+// Page Renderers (Sidebar and Lists)
 // ===========================================================================
 function updateSidebarUI() {
   const categoryFilterList = document.getElementById("category-filter-list");
@@ -568,42 +694,57 @@ function updateSidebarUI() {
   
   if (!categoryFilterList || !tagCloudList) return;
 
-  // 1. Categories counting
-  const categories = { "ALL": state.projects.length };
-  state.projects.forEach(p => {
-    if (p.category) {
-      categories[p.category] = (categories[p.category] || 0) + 1;
+  // Build custom categories filter with hierarchy
+  const cats = state.customCategories || [];
+  const allCount = state.projects.length;
+
+  let catHTML = `
+    <button class="filter-btn ${state.selectedCustomCategory === 'ALL' ? 'active' : ''}" data-category="ALL" data-subcategory="ALL">
+      <span>🗂️ 전체</span>
+      <span class="count">${allCount}</span>
+    </button>
+  `;
+
+  cats.forEach(cat => {
+    const catCount = state.projects.filter(p => p.customCategory === cat.name).length;
+    const isCatActive = state.selectedCustomCategory === cat.name && state.selectedCustomSubcategory === 'ALL';
+    catHTML += `
+      <button class="filter-btn filter-btn-parent ${isCatActive ? 'active' : ''}" data-category="${escapeHTML(cat.name)}" data-subcategory="ALL">
+        <span>${escapeHTML(cat.icon || '')} ${escapeHTML(cat.name)}</span>
+        <span class="count">${catCount}</span>
+      </button>
+    `;
+    if (cat.subcategories && cat.subcategories.length) {
+      cat.subcategories.forEach(sub => {
+        const subCount = state.projects.filter(p => p.customCategory === cat.name && p.customSubcategory === sub.name).length;
+        const isSubActive = state.selectedCustomCategory === cat.name && state.selectedCustomSubcategory === sub.name;
+        catHTML += `
+          <button class="filter-btn filter-btn-child ${isSubActive ? 'active' : ''}" data-category="${escapeHTML(cat.name)}" data-subcategory="${escapeHTML(sub.name)}">
+            <span>↳ ${escapeHTML(sub.name)}</span>
+            <span class="count">${subCount}</span>
+          </button>
+        `;
+      });
     }
   });
 
-  // Populate categories list HTML
-  categoryFilterList.innerHTML = Object.entries(categories).map(([name, count]) => `
-    <button class="filter-btn ${state.selectedCategory === name ? 'active' : ''}" data-category="${name}">
-      <span>${name}</span>
-      <span class="count">${count}</span>
-    </button>
-  `).join("");
+  categoryFilterList.innerHTML = catHTML;
 
-  // Attach click events to categories
-  categoryFilterList.querySelectorAll(".filter-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      state.selectedCategory = btn.getAttribute("data-category");
-      state.selectedTag = "ALL"; // Reset tag selection when choosing category
-      
-      // Update active styling
-      categoryFilterList.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      
-      // Sync tag clouds
-      updateSidebarUI();
+  // Attach click events for custom categories
+  categoryFilterList.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.selectedCustomCategory = btn.getAttribute('data-category');
+      state.selectedCustomSubcategory = btn.getAttribute('data-subcategory') || 'ALL';
+      categoryFilterList.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.selectedTag = 'ALL';
       updateProjectsList();
     });
   });
 
-  // 2. Tags listing
+  // Tags listing
   const tagCounts = {};
   state.projects.forEach(p => {
-    if (state.selectedCategory !== "ALL" && p.category !== state.selectedCategory) return;
     if (p.tags && Array.isArray(p.tags)) {
       p.tags.forEach(t => {
         tagCounts[t] = (tagCounts[t] || 0) + 1;
@@ -611,7 +752,6 @@ function updateSidebarUI() {
     }
   });
 
-  // Sort tags by frequency
   const sortedTags = Object.entries(tagCounts)
     .sort((a, b) => b[1] - a[1])
     .map(([tag]) => tag);
@@ -619,19 +759,15 @@ function updateSidebarUI() {
   tagCloudList.innerHTML = `
     <button class="tag-btn ${state.selectedTag === 'ALL' ? 'active' : ''}" data-tag="ALL">#all</button>
     ${sortedTags.map(tag => `
-      <button class="tag-btn ${state.selectedTag === tag ? 'active' : ''}" data-tag="${tag}">#${tag}</button>
+      <button class="tag-btn ${state.selectedTag === tag ? 'active' : ''}" data-tag="${escapeHTML(tag)}">#${escapeHTML(tag)}</button>
     `).join("")}
   `;
 
-  // Attach click events to tags
   tagCloudList.querySelectorAll(".tag-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       state.selectedTag = btn.getAttribute("data-tag");
-      
-      // Update active styling
       tagCloudList.querySelectorAll(".tag-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
-      
       updateProjectsList();
     });
   });
@@ -645,15 +781,18 @@ function updateProjectsList() {
 
   // Filter
   let filtered = state.projects.filter(p => {
-    // 1. Category Filter
-    if (state.selectedCategory !== "ALL" && p.category !== state.selectedCategory) {
+    // Category filter (custom)
+    if (state.selectedCustomCategory && state.selectedCustomCategory !== 'ALL') {
+      if (p.customCategory !== state.selectedCustomCategory) return false;
+      if (state.selectedCustomSubcategory && state.selectedCustomSubcategory !== 'ALL') {
+        if (p.customSubcategory !== state.selectedCustomSubcategory) return false;
+      }
+    }
+    // Tag filter
+    if (state.selectedTag !== 'ALL' && (!p.tags || !p.tags.includes(state.selectedTag))) {
       return false;
     }
-    // 2. Tag Filter
-    if (state.selectedTag !== "ALL" && (!p.tags || !p.tags.includes(state.selectedTag))) {
-      return false;
-    }
-    // 3. Search query
+    // Search query
     if (state.searchQuery) {
       const q = state.searchQuery.toLowerCase();
       const nameMatch = p.name ? p.name.toLowerCase().includes(q) : false;
@@ -746,268 +885,7 @@ function updateProjectsList() {
   });
 }
 
-// 2. Project Detail Page
-async function renderProjectDetailPage(projectId) {
-  appContainer.innerHTML = `<div class="loading">Loading project detail [${escapeHTML(projectId)}]...</div>`;
 
-  try {
-    const project = state.projects.find(p => p.id === projectId);
-    if (!project) {
-      throw new Error("해당 프로젝트(Discussion)를 찾을 수 없습니다.");
-    }
-
-    // Fetch comments for this discussion
-    const commentsQuery = `
-      query($owner: String!, $name: String!, $number: Int!) {
-        repository(owner: $owner, name: $name) {
-          discussion(number: $number) {
-            comments(first: 20) {
-              nodes {
-                id
-                body
-                createdAt
-                author {
-                  login
-                  avatarUrl
-                }
-              }
-            }
-          }
-        }
-      }
-    `;
-    const data = await fetchGraphQL(commentsQuery, {
-      owner: GITHUB_REPO_OWNER,
-      name: GITHUB_REPO_NAME,
-      number: parseInt(projectId, 10)
-    });
-
-    const commentsNodes = data.repository.discussion.comments.nodes || [];
-    const commentsHTML = commentsNodes.map(c => `
-      <div style="border-bottom: 1px solid var(--border-color); padding: 10px 0; text-align: left;">
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
-          <img src="${escapeHTML(c.author.avatarUrl)}" width="20" height="20" style="border-radius:50%;">
-          <strong>${escapeHTML(c.author.login)}</strong>
-          <span style="font-size: 11px; opacity: 0.6;">${c.createdAt.split('T')[0]}</span>
-        </div>
-        <div style="font-size: 13px;">${safeMarkdown(c.body)}</div>
-      </div>
-    `).join("");
-
-    appContainer.innerHTML = `
-      <div class="back-btn-container">
-        <a href="#/" class="btn">&larr; Back to Feed</a>
-      </div>
-
-      <div class="project-detail-layout">
-        <article class="project-main">
-          <h1 class="project-detail-title">${escapeHTML(project.name)}</h1>
-          
-          <div class="project-detail-meta">
-            <span>Author: <strong>${escapeHTML(project.author)}</strong></span>
-            <span>Created: ${project.createdAt}</span>
-            <span>Category: <strong>${escapeHTML(project.category)}</strong></span>
-          </div>
-
-          <div class="project-content">
-            ${safeMarkdown(project.content)}
-          </div>
-        </article>
-
-        <aside class="project-sidebar">
-          <div class="info-card">
-            <h4 class="info-card-title">Interactions</h4>
-            <div class="interact-panel">
-              <a href="https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/discussions/${project.id}" target="_blank" rel="noopener" class="btn" style="width:100%; text-align:center; margin-bottom: 10px;">
-                View on GitHub (Like/Comment)
-              </a>
-            </div>
-            
-            <div style="margin-top: 20px; font-size: 12px; border-top: 1px dashed var(--border-color); padding-top: 15px;">
-              <h5 style="font-weight: 800; margin-bottom: 10px;">Comments (${project.stats.comments})</h5>
-              ${commentsHTML || '<div style="opacity:0.6; text-align:center;">댓글이 없습니다.</div>'}
-            </div>
-          </div>
-        </aside>
-      </div>
-    `;
-
-  } catch (error) {
-    appContainer.innerHTML = `
-      <div class="error-msg">
-        <h3>프로젝트 상세 정보 로드 실패</h3>
-        <p>${error.message}</p>
-        <a href="#/" class="btn" style="margin-top: 15px; display: inline-block;">피드로 돌아가기</a>
-      </div>
-    `;
-  }
-}
-
-// 3. User Profile Page
-async function renderUserProfilePage(username) {
-  appContainer.innerHTML = `<div class="loading">Loading user profile [${escapeHTML(username)}]...</div>`;
-
-  try {
-    // Find all projects created by this user
-    const userProjects = state.projects.filter(p => p.author === username);
-    
-    // We don't have a backend users db anymore, so we build a simple profile
-    const avatarUrl = userProjects.length > 0 ? userProjects[0].authorAvatar : `https://github.com/${username}.png`;
-
-    appContainer.innerHTML = `
-      <div class="back-btn-container">
-        <a href="#/" class="btn">&larr; Back to Feed</a>
-      </div>
-
-      <div class="profile-header-card">
-        <img src="${escapeHTML(avatarUrl)}" class="profile-avatar" alt="${escapeHTML(username)} Avatar">
-        <div class="profile-details">
-          <h2 class="profile-name">${escapeHTML(username)}</h2>
-          <div class="profile-username">@${escapeHTML(username)}</div>
-          <div class="profile-bio" style="margin-top:10px;">
-            ${userProfileObj ? safeMarkdown(userProfileObj.content) : `<p style="opacity:0.6;">프로필 정보가 없습니다.</p>`}
-          </div>
-          <div class="profile-meta">
-            Discussions Published: ${userProjects.length}
-          </div>
-        </div>
-      </div>
-
-      <div class="profile-projects-section">
-        <h3 class="profile-projects-title">Projects by @${escapeHTML(username)}</h3>
-        <div class="projects-grid">
-          ${userProjects.length === 0 ? `
-            <div style="border: 2px dashed var(--border-color); padding: 40px; text-align: center; font-weight: 700;">
-              작성한 프로젝트가 없습니다.
-            </div>
-          ` : userProjects.map(p => {
-            const imageHTML = `
-              <div class="project-card-image-wrapper">
-                <div class="project-card-placeholder">
-                  <span>◇</span>
-                  <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 1px;">${escapeHTML(p.category)}</span>
-                </div>
-              </div>
-            `;
-
-            return `
-              <a href="#/project/${p.id}" class="project-card">
-                ${imageHTML}
-                <div class="project-card-body">
-                  <div class="project-card-title-row">
-                    <h4 class="project-card-title">${escapeHTML(p.name)}</h4>
-                    <span class="project-card-category">${escapeHTML(p.category)}</span>
-                  </div>
-                  <p class="project-card-desc">${escapeHTML(p.description)}</p>
-                  
-                  <div class="project-card-footer">
-                    <div class="project-card-meta-row">
-                      <div>
-                        by <strong>${escapeHTML(p.author)}</strong>
-                      </div>
-                      <div class="card-stats">
-                        <span class="stat-item">⭐ ${(p.stats && p.stats.likes) || 0}</span>
-                        <span class="stat-item">💬 ${(p.stats && p.stats.comments) || 0}</span>
-                      </div>
-                    </div>
-                    <div class="project-card-tags">
-                      ${(p.tags || []).map(t => `<span>#${escapeHTML(t)}</span>`).join(" ")}
-                    </div>
-                  </div>
-                </div>
-              </a>
-            `;
-          }).join("")}
-        </div>
-      </div>
-    `;
-
-  } catch (error) {
-    appContainer.innerHTML = `
-      <div class="error-msg">
-        <h3>사용자 프로필 로드 실패</h3>
-        <p>${error.message}</p>
-        <a href="#/" class="btn" style="margin-top: 15px; display: inline-block;">피드로 돌아가기</a>
-      </div>
-    `;
-  }
-}
-
-// 4. Project Upload Guide / Submission Form Page
-function renderSubmitPage() {
-  appContainer.innerHTML = `
-    <div class="submit-container">
-      <div class="submit-header">
-        <h2 class="submit-title">새 프로젝트 등록</h2>
-        <p class="submit-subtitle">등록한 프로젝트는 Projects 카테고리에 자동으로 생성됩니다.</p>
-      </div>
-
-      <form id="submission-form" onsubmit="return false;">
-        <div class="form-group">
-          <label class="form-label" for="proj-name">프로젝트 이름 (Title)</label>
-          <input type="text" class="form-control" id="proj-name" placeholder="멋진 프로젝트 이름을 적어주세요." required>
-        </div>
-
-        <div class="form-row" style="display:flex; gap:20px;">
-          <div class="form-group" style="flex:1;">
-            <label class="form-label" for="proj-tags">태그 (쉼표로 구분)</label>
-            <input type="text" class="form-control" id="proj-tags" placeholder="예: Web, AI, Game">
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="proj-content">프로젝트 설명 (Markdown)</label>
-          <textarea class="form-control" id="proj-content" rows="10" placeholder="# 프로젝트 개요&#10;&#10;상세한 설명을 마크다운으로 작성해주세요." required></textarea>
-        </div>
-        
-        <button class="btn" id="submit-project-btn" style="width: 100%; height: 48px; font-size: 16px; margin-top:20px;">게시하기 (Create Discussion)</button>
-        <div id="submit-error" class="error-msg" style="margin-top:15px;"></div>
-      </form>
-    </div>
-  `;
-
-  document.getElementById('submit-project-btn').addEventListener('click', async () => {
-    const title = document.getElementById('proj-name').value.trim();
-    const tags = document.getElementById('proj-tags').value.trim();
-    const content = document.getElementById('proj-content').value.trim();
-    const errorDiv = document.getElementById('submit-error');
-    const btn = document.getElementById('submit-project-btn');
-    errorDiv.textContent = '';
-
-    if (!title || !content) {
-      errorDiv.textContent = "제목과 설명을 모두 입력해주세요.";
-      return;
-    }
-
-    if (!state.projectsCategory) {
-      errorDiv.textContent = "Projects 카테고리를 찾을 수 없습니다. GitHub 저장소에 'Projects' 카테고리가 있는지 확인하세요.";
-      return;
-    }
-
-    // Convert comma tags into #tags appended to body
-    let finalBody = content;
-    if (tags) {
-      const hashtagStr = tags.split(',').map(t => '#' + t.trim()).join(' ');
-      finalBody += `\n\n--- \n${hashtagStr}`;
-    }
-
-    try {
-      btn.textContent = "게시 중...";
-      btn.disabled = true;
-      const discussionNumber = await createDiscussion(state.projectsCategory.id, title, finalBody);
-      
-      // Clear feed cache to force refresh
-      state.projects = [];
-      alert("프로젝트가 등록되었습니다!");
-      window.location.hash = `#/project/${discussionNumber}`;
-    } catch (e) {
-      console.error(e);
-      errorDiv.textContent = "등록 실패: " + e.message;
-      btn.textContent = "게시하기 (Create Discussion)";
-      btn.disabled = false;
-    }
-  });
-}
 
 function renderVerificationPendingPage() {
   appContainer.innerHTML = `

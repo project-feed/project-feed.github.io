@@ -316,6 +316,27 @@ header {
   border-color: var(--hover-text);
 }
 
+/* Category hierarchy */
+.filter-btn-parent {
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.filter-btn-child {
+  padding-left: 22px;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.filter-btn-child:hover {
+  opacity: 1;
+}
+
+.filter-btn-child.active {
+  opacity: 1;
+}
+
 /* Tag Cloud */
 .tag-cloud {
   display: flex;

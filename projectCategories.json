@@ -1,0 +1,71 @@
+[
+  {
+    "id": "web",
+    "name": "Web",
+    "icon": "🌐",
+    "subcategories": [
+      { "id": "frontend", "name": "Frontend" },
+      { "id": "backend", "name": "Backend" },
+      { "id": "fullstack", "name": "Fullstack" }
+    ]
+  },
+  {
+    "id": "mobile",
+    "name": "Mobile",
+    "icon": "📱",
+    "subcategories": [
+      { "id": "ios", "name": "iOS" },
+      { "id": "android", "name": "Android" },
+      { "id": "crossplatform", "name": "Cross-Platform" }
+    ]
+  },
+  {
+    "id": "ai",
+    "name": "AI / ML",
+    "icon": "🤖",
+    "subcategories": [
+      { "id": "machinelearning", "name": "Machine Learning" },
+      { "id": "deeplearning", "name": "Deep Learning" },
+      { "id": "nlp", "name": "NLP" },
+      { "id": "computervision", "name": "Computer Vision" }
+    ]
+  },
+  {
+    "id": "game",
+    "name": "Game",
+    "icon": "🎮",
+    "subcategories": [
+      { "id": "unity", "name": "Unity" },
+      { "id": "unreal", "name": "Unreal" },
+      { "id": "2d", "name": "2D" },
+      { "id": "3d", "name": "3D" }
+    ]
+  },
+  {
+    "id": "tool",
+    "name": "Tool / Library",
+    "icon": "🛠️",
+    "subcategories": [
+      { "id": "cli", "name": "CLI" },
+      { "id": "library", "name": "Library" },
+      { "id": "framework", "name": "Framework" },
+      { "id": "devops", "name": "DevOps" }
+    ]
+  },
+  {
+    "id": "hardware",
+    "name": "Hardware",
+    "icon": "🔧",
+    "subcategories": [
+      { "id": "iot", "name": "IoT" },
+      { "id": "arduino", "name": "Arduino" },
+      { "id": "raspberrypi", "name": "Raspberry Pi" }
+    ]
+  },
+  {
+    "id": "other",
+    "name": "Other",
+    "icon": "📦",
+    "subcategories": []
+  }
+]
