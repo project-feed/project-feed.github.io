@@ -250,18 +250,22 @@ async function router() {
   if (loginLink) loginLink.classList.remove("active");
   if (editProfileLink) editProfileLink.classList.remove("active");
 
+  // Routing Matches that don't need initial data
+  if (routes.login.test(hash)) {
+    if (loginLink) loginLink.classList.add("active");
+    renderLoginPage();
+    return;
+  }
+
   // Load database index if not loaded
   if (state.projects.length === 0) {
     try {
       await loadInitialData();
     } catch (e) {
-      return; // Stop routing if initial data failed
+      // Error message is already rendered by loadInitialData
+      return; 
     }
   }
-
-  // Block unauthenticated users from seeing pages that might require auth? 
-  // For now, we will require auth for everything except feed if they have no token.
-  // Actually, wait until we implement GraphQL fetching.
 
   // Routing Matches
   if (routes.feed.test(hash)) {
