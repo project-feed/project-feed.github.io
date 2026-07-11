@@ -164,6 +164,7 @@ async function loadInitialData() {
                 }
               }
               upvoteCount
+              viewerHasUpvoted
               comments {
                 totalCount
               }
@@ -196,18 +197,24 @@ async function loadInitialData() {
       const foundTags = [...d.body.matchAll(hashtagRegex)].map(match => match[1]);
       const uniqueTags = [...new Set([...d.labels.nodes.map(l => l.name), ...foundTags])];
 
+      // Parse image URL from body (stored as Image: <url>)
+      const imageMatch = d.body.match(/^Image:\s*(https?:\/\/\S+)$/m);
+      const imageUrl = imageMatch ? imageMatch[1].trim() : null;
+
       return {
         id: d.number.toString(),
+        graphqlId: d.id,
         name: d.title,
         description: (() => {
-          // Strip Category/Subcategory metadata lines before making preview
           const cleaned = d.body
             .replace(/^Category:.*$/m, '')
             .replace(/^Subcategory:.*$/m, '')
+            .replace(/^Image:.*$/m, '')
             .trim();
           return cleaned.substring(0, 150) + (cleaned.length > 150 ? '...' : '');
         })(),
         content: d.body,
+        image: imageUrl,
         category: d.category.name,
         customCategory,
         customSubcategory,
@@ -216,6 +223,7 @@ async function loadInitialData() {
         authorAvatar: d.author.avatarUrl,
         createdAt: d.createdAt.split('T')[0],
         updatedAt: d.updatedAt.split('T')[0],
+        viewerHasUpvoted: d.viewerHasUpvoted || false,
         stats: {
           likes: d.upvoteCount,
           views: 0,
@@ -268,6 +276,31 @@ async function createDiscussion(categoryId, title, body) {
   `;
   const data = await fetchGraphQL(query, { repoId: state.repoId, catId: categoryId, title, body });
   return data.createDiscussion.discussion.number;
+}
+
+async function toggleUpvote(project) {
+  const mutation = project.viewerHasUpvoted
+    ? `mutation($id: ID!) { removeUpvote(input: {subjectId: $id}) { subject { upvoteCount viewerHasUpvoted } } }`
+    : `mutation($id: ID!) { addUpvote(input: {subjectId: $id}) { subject { upvoteCount viewerHasUpvoted } } }`;
+
+  const key = project.viewerHasUpvoted ? 'removeUpvote' : 'addUpvote';
+  const data = await fetchGraphQL(mutation, { id: project.graphqlId });
+  return data[key].subject;
+}
+
+async function uploadToImgur(file) {
+  // Imgur anonymous upload (Client-ID from public Imgur API)
+  const IMGUR_CLIENT_ID = 'c9a6efb3d7932fd';
+  const formData = new FormData();
+  formData.append('image', file);
+  const res = await fetch('https://api.imgur.com/3/image', {
+    method: 'POST',
+    headers: { Authorization: `Client-ID ${IMGUR_CLIENT_ID}` },
+    body: formData
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error('Imgur 업로드 실패: ' + (json.data?.error || 'Unknown error'));
+  return json.data.link;
 }
 
 // ==========================================================================
@@ -1022,7 +1055,17 @@ async function renderProjectDetailPage(projectId) {
               <span style="font-size:13px; font-weight:700;">${escapeHTML(project.author)}</span>
             </a>
             <span style="font-size:12px; opacity:0.5;">${project.createdAt}</span>
-            <span style="font-size:13px;">⭐ ${project.stats.likes || 0}</span>
+            <button id="upvote-btn" style="
+              display:inline-flex; align-items:center; gap:6px;
+              background:${project.viewerHasUpvoted ? 'var(--text-color)' : 'transparent'};
+              color:${project.viewerHasUpvoted ? 'var(--bg-color)' : 'var(--text-color)'};
+              border: 2px solid var(--border-color);
+              padding:4px 12px; font-size:13px; font-weight:700;
+              cursor:pointer; font-family:var(--font-family);
+              transition: all 0.15s ease;
+            ">
+              ⭐ <span id="upvote-count">${project.stats.likes || 0}</span>
+            </button>
             <span style="font-size:13px;">💬 ${project.stats.comments || 0}</span>
           </div>
           ${tagsHTML ? `<div style="margin-top:12px;">${tagsHTML}</div>` : ''}
@@ -1045,6 +1088,30 @@ async function renderProjectDetailPage(projectId) {
       </section>
     </div>
   `;
+
+  // Upvote button logic
+  const upvoteBtn = document.getElementById('upvote-btn');
+  if (upvoteBtn) {
+    upvoteBtn.addEventListener('click', async () => {
+      if (!state.currentUser) {
+        alert('로그인 후 별점을 남길 수 있습니다.');
+        return;
+      }
+      upvoteBtn.disabled = true;
+      try {
+        const result = await toggleUpvote(project);
+        project.viewerHasUpvoted = result.viewerHasUpvoted;
+        project.stats.likes = result.upvoteCount;
+        document.getElementById('upvote-count').textContent = result.upvoteCount;
+        upvoteBtn.style.background = result.viewerHasUpvoted ? 'var(--text-color)' : 'transparent';
+        upvoteBtn.style.color = result.viewerHasUpvoted ? 'var(--bg-color)' : 'var(--text-color)';
+      } catch (e) {
+        alert('오류: ' + e.message);
+      } finally {
+        upvoteBtn.disabled = false;
+      }
+    });
+  }
 }
 
 // User Profile Page
