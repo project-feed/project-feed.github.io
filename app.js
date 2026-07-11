@@ -21,14 +21,17 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
 
 // Application State
+const ADMIN_GITHUB_IDS = ['HJhajun'];
+
 const state = {
   projects: [],
   searchQuery: "",
   selectedCategory: "ALL",
   selectedTag: "ALL",
-  sortBy: "likes", // Default sort: likes. Options: likes, createdAt, name
+  sortBy: "likes",
   currentUser: null,
-  userProfile: null
+  userProfile: null,
+  isAdmin: false
 };
 
 // DOM Cache
@@ -194,9 +197,16 @@ async function loadInitialData() {
       const uniqueTags = [...new Set([...d.labels.nodes.map(l => l.name), ...foundTags])];
 
       return {
-        id: d.number.toString(), // Use issue/discussion number as ID
+        id: d.number.toString(),
         name: d.title,
-        description: d.body.substring(0, 150) + (d.body.length > 150 ? '...' : ''), // Preview
+        description: (() => {
+          // Strip Category/Subcategory metadata lines before making preview
+          const cleaned = d.body
+            .replace(/^Category:.*$/m, '')
+            .replace(/^Subcategory:.*$/m, '')
+            .trim();
+          return cleaned.substring(0, 150) + (cleaned.length > 150 ? '...' : '');
+        })(),
         content: d.body,
         category: d.category.name,
         customCategory,
@@ -397,7 +407,6 @@ function updateUserHeaderUI() {
           </div>
         </div>
       `;
-      // Update theme UI immediately for the new button
       updateThemeUI(document.documentElement.getAttribute("data-theme") || "light");
     }
 
@@ -439,10 +448,11 @@ window.addEventListener("hashchange", router);
 // Initialize Auth State Listener
 auth.onAuthStateChanged(async (user) => {
   state.currentUser = user;
-  
+
   if (user) {
-    // Attempt to load profile if available, otherwise just use auth info
     const username = (user.reloadUserInfo && user.reloadUserInfo.screenName) || user.email?.split('@')[0] || "user";
+    // Check admin
+    state.isAdmin = ADMIN_GITHUB_IDS.includes(username);
     try {
       const profile = await fetchJSON(`./users/${username}.json`).catch(() => null);
       state.userProfile = profile || { username, avatar: user.photoURL };
@@ -453,8 +463,9 @@ auth.onAuthStateChanged(async (user) => {
   } else {
     state.currentUser = null;
     state.userProfile = null;
+    state.isAdmin = false;
   }
-  
+
   updateUserHeaderUI();
   router();
 });
@@ -885,14 +896,228 @@ function updateProjectsList() {
   });
 }
 
+// Project Detail Page
+async function renderProjectDetailPage(projectId) {
+  appContainer.innerHTML = `<div class="loading">로딩 중...</div>`;
 
+  // Find project from state (already loaded)
+  let project = state.projects.find(p => p.id === projectId);
 
-function renderVerificationPendingPage() {
+  // If not found in state, try fetching directly via GraphQL
+  if (!project) {
+    try {
+      const query = `
+        query($owner: String!, $name: String!, $number: Int!) {
+          repository(owner: $owner, name: $name) {
+            discussion(number: $number) {
+              id
+              number
+              title
+              body
+              createdAt
+              updatedAt
+              author { login avatarUrl }
+              category { name }
+              labels(first: 5) { nodes { name } }
+              upvoteCount
+              comments(first: 30) {
+                totalCount
+                nodes {
+                  id
+                  body
+                  createdAt
+                  author { login avatarUrl }
+                }
+              }
+            }
+          }
+        }
+      `;
+      const data = await fetchGraphQL(query, {
+        owner: GITHUB_REPO_OWNER,
+        name: GITHUB_REPO_NAME,
+        number: parseInt(projectId)
+      });
+      const d = data.repository.discussion;
+      if (d) {
+        const hashtagRegex = /#([\w가-힣]+)/g;
+        const foundTags = [...d.body.matchAll(hashtagRegex)].map(m => m[1]);
+        const uniqueTags = [...new Set([...d.labels.nodes.map(l => l.name), ...foundTags])];
+        const categoryMatch = d.body.match(/^Category:\s*(.+)$/m);
+        const subcatMatch = d.body.match(/^Subcategory:\s*(.+)$/m);
+        project = {
+          id: d.number.toString(),
+          name: d.title,
+          content: d.body,
+          description: d.body.substring(0, 150),
+          category: d.category.name,
+          customCategory: categoryMatch ? categoryMatch[1].trim() : '',
+          customSubcategory: subcatMatch ? subcatMatch[1].trim() : '',
+          tags: uniqueTags,
+          author: d.author.login,
+          authorAvatar: d.author.avatarUrl,
+          createdAt: d.createdAt.split('T')[0],
+          updatedAt: d.updatedAt.split('T')[0],
+          stats: { likes: d.upvoteCount, comments: d.comments.totalCount },
+          comments: d.comments.nodes
+        };
+      }
+    } catch (e) {
+      appContainer.innerHTML = `
+        <div class="error-msg">
+          <h3>프로젝트를 불러올 수 없습니다</h3>
+          <p>${e.message}</p>
+          <a href="#/" class="btn" style="margin-top:15px; display:inline-block;">홈으로</a>
+        </div>
+      `;
+      return;
+    }
+  }
+
+  if (!project) {
+    render404();
+    return;
+  }
+
+  // Strip Category/Subcategory metadata lines from displayed content
+  const displayContent = project.content
+    .replace(/^Category:.*$/m, '')
+    .replace(/^Subcategory:.*$/m, '')
+    .trim();
+
+  const tagsHTML = (project.tags || [])
+    .map(t => `<span class="project-card-category" style="margin-right:6px;">#${escapeHTML(t)}</span>`)
+    .join('');
+
+  const commentsHTML = (project.comments || []).map(c => `
+    <div class="comment-item" style="border-top: 1px solid var(--border-color); padding: 16px 0; display:flex; gap:12px;">
+      <img src="${escapeHTML(c.author.avatarUrl)}" width="32" height="32" style="border-radius:50%; border:1px solid var(--border-color); flex-shrink:0;">
+      <div>
+        <div style="font-size:12px; font-weight:800; margin-bottom:6px;">
+          <a href="#/user/${escapeHTML(c.author.login)}" style="text-decoration:none; color:inherit;">${escapeHTML(c.author.login)}</a>
+          <span style="font-weight:400; opacity:0.5; margin-left:8px;">${c.createdAt.split('T')[0]}</span>
+        </div>
+        <div class="markdown-body">${safeMarkdown(c.body)}</div>
+      </div>
+    </div>
+  `).join('');
+
   appContainer.innerHTML = `
-    <div class="error-msg">
-      <h3>권한 대기 중</h3>
-      <p>현재 계정 상태를 확인하고 있습니다. 잠시 후 다시 시도해주세요.</p>
-      <button class="btn" onclick="location.reload()" style="margin-top: 15px;">새로고침</button>
+    <div class="project-detail-container" style="max-width:860px; margin:0 auto;">
+      <div style="margin-bottom:20px;">
+        <a href="#/" style="font-size:13px; font-weight:700; text-decoration:none; color:var(--text-color); opacity:0.6;">← 피드로 돌아가기</a>
+      </div>
+
+      <article>
+        <header style="border-bottom: 3px solid var(--border-color); padding-bottom: 20px; margin-bottom: 24px;">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px; font-size:12px; font-weight:700; opacity:0.5; text-transform:uppercase; letter-spacing:0.05em;">
+            ${project.customCategory ? `<span>${escapeHTML(project.customCategory)}</span>` : ''}
+            ${project.customCategory && project.customSubcategory ? '<span>›</span>' : ''}
+            ${project.customSubcategory ? `<span>${escapeHTML(project.customSubcategory)}</span>` : ''}
+          </div>
+          <h1 style="font-size:28px; font-weight:900; line-height:1.3; margin-bottom:16px;">${escapeHTML(project.name)}</h1>
+          <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+            <a href="#/user/${escapeHTML(project.author)}" style="display:flex; align-items:center; gap:8px; text-decoration:none; color:inherit;">
+              <img src="${escapeHTML(project.authorAvatar)}" width="28" height="28" style="border-radius:50%; border:1px solid var(--border-color);">
+              <span style="font-size:13px; font-weight:700;">${escapeHTML(project.author)}</span>
+            </a>
+            <span style="font-size:12px; opacity:0.5;">${project.createdAt}</span>
+            <span style="font-size:13px;">⭐ ${project.stats.likes || 0}</span>
+            <span style="font-size:13px;">💬 ${project.stats.comments || 0}</span>
+          </div>
+          ${tagsHTML ? `<div style="margin-top:12px;">${tagsHTML}</div>` : ''}
+        </header>
+
+        <div class="markdown-body" style="line-height:1.8; font-size:15px;">
+          ${safeMarkdown(displayContent)}
+        </div>
+      </article>
+
+      <!-- Comments -->
+      <section style="margin-top:48px;">
+        <h3 style="font-size:16px; font-weight:800; margin-bottom:8px; border-bottom: 2px solid var(--border-color); padding-bottom:12px;">
+          댓글 ${project.stats.comments || 0}개
+        </h3>
+        ${commentsHTML || `<p style="opacity:0.5; font-size:13px; padding:20px 0;">아직 댓글이 없습니다.</p>`}
+        <div style="margin-top:20px; padding:16px; border: 2px dashed var(--border-color); font-size:13px; text-align:center; opacity:0.6;">
+          댓글은 <a href="https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/discussions/${projectId}" target="_blank" style="color:inherit; font-weight:700;">GitHub Discussions</a>에서 작성할 수 있습니다.
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+// User Profile Page
+async function renderUserProfilePage(username) {
+  appContainer.innerHTML = `<div class="loading">로딩 중...</div>`;
+
+  const profile = state.userProfiles
+    ? state.userProfiles.find(p => p.author === username)
+    : null;
+
+  const userProjects = state.projects.filter(p => p.author === username);
+
+  appContainer.innerHTML = `
+    <div style="max-width:860px; margin:0 auto;">
+      <div style="margin-bottom:20px;">
+        <a href="#/" style="font-size:13px; font-weight:700; text-decoration:none; color:var(--text-color); opacity:0.6;">← 피드로 돌아가기</a>
+      </div>
+
+      <div style="display:flex; align-items:center; gap:20px; border-bottom:3px solid var(--border-color); padding-bottom:24px; margin-bottom:32px;">
+        <img src="https://avatars.githubusercontent.com/${escapeHTML(username)}" width="72" height="72"
+          style="border-radius:50%; border:2px solid var(--border-color);"
+          onerror="this.src='https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=80&h=80&fit=crop'">
+        <div>
+          <h1 style="font-size:22px; font-weight:900; margin-bottom:4px;">${escapeHTML(username)}</h1>
+          <a href="https://github.com/${escapeHTML(username)}" target="_blank"
+            style="font-size:12px; font-weight:700; color:inherit; opacity:0.5; text-decoration:none;">
+            @${escapeHTML(username)} on GitHub ↗
+          </a>
+        </div>
+      </div>
+
+      <h2 style="font-size:16px; font-weight:800; margin-bottom:16px;">등록한 프로젝트 (${userProjects.length})</h2>
+      ${userProjects.length === 0
+        ? `<p style="opacity:0.5; font-size:13px;">아직 등록한 프로젝트가 없습니다.</p>`
+        : `<div class="projects-grid">
+            ${userProjects.map(p => `
+              <a href="#/project/${p.id}" class="project-card">
+                <div class="project-card-image-wrapper">
+                  <div class="project-card-placeholder"><span>◇</span></div>
+                </div>
+                <div class="project-card-body">
+                  <div class="project-card-title-row">
+                    <h4 class="project-card-title">${escapeHTML(p.name)}</h4>
+                    <span class="project-card-category">${escapeHTML(p.customCategory || p.category)}</span>
+                  </div>
+                  <p class="project-card-desc">${escapeHTML(p.description)}</p>
+                  <div class="project-card-footer">
+                    <div class="card-stats">
+                      <span class="stat-item">⭐ ${p.stats.likes || 0}</span>
+                      <span class="stat-item">💬 ${p.stats.comments || 0}</span>
+                    </div>
+                  </div>
+                </div>
+              </a>
+            `).join('')}
+          </div>`
+      }
+    </div>
+  `;
+}
+
+function renderEditProfilePage() {
+  if (!state.currentUser) {
+    window.location.hash = '#/login';
+    return;
+  }
+  appContainer.innerHTML = `
+    <div style="max-width:600px; margin:0 auto; text-align:center; padding:60px 0;">
+      <h2 style="font-size:22px; font-weight:900; margin-bottom:12px;">프로필 편집</h2>
+      <p style="opacity:0.6; font-size:13px;">프로필은 GitHub 계정 정보를 자동으로 사용합니다.</p>
+      <a href="https://github.com/settings/profile" target="_blank" class="btn" style="margin-top:20px; display:inline-block;">
+        GitHub에서 프로필 편집 ↗
+      </a>
     </div>
   `;
 }

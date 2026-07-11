@@ -1039,7 +1039,7 @@ footer a:hover {
    ========================================================================== */
 
 .text-center { text-align: center; }
-.error-msg {
+.error-msg:not(:empty) {
   border: 2px solid var(--border-color);
   padding: 20px;
   background-color: var(--tag-bg);
@@ -1121,6 +1121,22 @@ footer a:hover {
 
 .user-menu-btn:hover img {
   filter: grayscale(0%);
+}
+
+/* Admin Badge */
+.admin-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  background-color: var(--text-color);
+  color: var(--bg-color);
+  border-radius: 2px;
+  vertical-align: middle;
+  line-height: 1.4;
+  margin-left: 4px;
+  text-transform: uppercase;
 }
 
 /* Verification Pending Info */
