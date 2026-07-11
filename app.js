@@ -124,6 +124,13 @@ async function loadInitialData() {
     const query = `
       query($owner: String!, $name: String!) {
         repository(owner: $owner, name: $name) {
+          id
+          discussionCategories(first: 10) {
+            nodes {
+              id
+              name
+            }
+          }
           discussions(first: 50, orderBy: {field: CREATED_AT, direction: DESC}) {
             nodes {
               id
@@ -155,28 +162,57 @@ async function loadInitialData() {
     `;
     const data = await fetchGraphQL(query, { owner: GITHUB_REPO_OWNER, name: GITHUB_REPO_NAME });
     
+    state.repoId = data.repository.id;
+    state.discussionCategories = data.repository.discussionCategories.nodes || [];
+    
+    state.projectsCategory = state.discussionCategories.find(c => c.name.toLowerCase() === 'projects');
+    state.usersCategory = state.discussionCategories.find(c => c.name.toLowerCase() === 'users');
+
     // Transform Discussions into our project state format
     const discussions = data.repository.discussions.nodes || [];
-    state.projects = discussions.map(d => {
+    const mappedDiscussions = discussions.map(d => {
+      // Simple hashtag parsing for custom tags (e.g. #Web #Mobile)
+      const hashtagRegex = /#([\w가-힣]+)/g;
+      const foundTags = [...d.body.matchAll(hashtagRegex)].map(match => match[1]);
+      const uniqueTags = [...new Set([...d.labels.nodes.map(l => l.name), ...foundTags])];
+
       return {
         id: d.number.toString(), // Use issue/discussion number as ID
         name: d.title,
         description: d.body.substring(0, 150) + (d.body.length > 150 ? '...' : ''), // Preview
         content: d.body,
         category: d.category.name,
-        tags: d.labels.nodes.map(l => l.name),
+        tags: uniqueTags,
         author: d.author.login,
         authorAvatar: d.author.avatarUrl,
         createdAt: d.createdAt.split('T')[0],
         updatedAt: d.updatedAt.split('T')[0],
         stats: {
           likes: d.upvoteCount,
-          views: 0, // Discussions API doesn't provide views directly
+          views: 0,
           bookmarks: 0,
           comments: d.comments.totalCount
         }
       };
     });
+
+    state.projects = mappedDiscussions.filter(d => d.category.toLowerCase() === 'projects');
+    state.userProfiles = mappedDiscussions.filter(d => d.category.toLowerCase() === 'users');
+
+    // Auto-create profile if missing
+    if (state.currentUser && state.usersCategory) {
+      const username = (state.currentUser.reloadUserInfo && state.currentUser.reloadUserInfo.screenName) || state.currentUser.email?.split('@')[0];
+      const existingProfile = state.userProfiles.find(p => p.author === username);
+      
+      if (!existingProfile) {
+        // Run in background
+        createDiscussion(state.usersCategory.id, `${username}의 프로필`, `안녕하세요! ${username}입니다.\n\n#profile`)
+          .then(() => console.log("자동 프로필 생성 완료!"))
+          .catch(e => console.error("자동 프로필 생성 실패:", e));
+      } else if (state.userProfile) {
+        state.userProfile.bio = existingProfile.content;
+      }
+    }
   } catch (error) {
     appContainer.innerHTML = `
       <div class="error-msg" style="text-align: center; margin-top: 50px;">
@@ -188,6 +224,21 @@ async function loadInitialData() {
     `;
     throw error;
   }
+}
+
+async function createDiscussion(categoryId, title, body) {
+  if (!state.repoId) throw new Error("레포지토리 ID를 찾을 수 없습니다.");
+  const query = `
+    mutation($repoId: ID!, $catId: ID!, $title: String!, $body: String!) {
+      createDiscussion(input: {repositoryId: $repoId, categoryId: $catId, title: $title, body: $body}) {
+        discussion {
+          number
+        }
+      }
+    }
+  `;
+  const data = await fetchGraphQL(query, { repoId: state.repoId, catId: categoryId, title, body });
+  return data.createDiscussion.discussion.number;
 }
 
 // ==========================================================================
@@ -813,7 +864,9 @@ async function renderUserProfilePage(username) {
         <div class="profile-details">
           <h2 class="profile-name">${escapeHTML(username)}</h2>
           <div class="profile-username">@${escapeHTML(username)}</div>
-          <p class="profile-bio">GitHub User</p>
+          <div class="profile-bio" style="margin-top:10px;">
+            ${userProfileObj ? safeMarkdown(userProfileObj.content) : `<p style="opacity:0.6;">프로필 정보가 없습니다.</p>`}
+          </div>
           <div class="profile-meta">
             Discussions Published: ${userProjects.length}
           </div>
@@ -821,11 +874,11 @@ async function renderUserProfilePage(username) {
       </div>
 
       <div class="profile-projects-section">
-        <h3 class="profile-projects-title">Discussions by @${escapeHTML(username)}</h3>
+        <h3 class="profile-projects-title">Projects by @${escapeHTML(username)}</h3>
         <div class="projects-grid">
           ${userProjects.length === 0 ? `
             <div style="border: 2px dashed var(--border-color); padding: 40px; text-align: center; font-weight: 700;">
-              작성한 글(Discussion)이 없습니다.
+              작성한 프로젝트가 없습니다.
             </div>
           ` : userProjects.map(p => {
             const imageHTML = `
@@ -883,24 +936,77 @@ async function renderUserProfilePage(username) {
 // 4. Project Upload Guide / Submission Form Page
 function renderSubmitPage() {
   appContainer.innerHTML = `
-    <div class="submit-container" style="text-align: center; margin-top: 50px;">
-      <h2 class="submit-title">새 글 쓰기</h2>
-      <p class="submit-subtitle" style="margin-bottom: 30px;">
-        모든 프로젝트와 글은 GitHub Discussions로 관리됩니다.
-      </p>
-      
-      <div class="guide-box" style="text-align: left; max-width: 600px; margin: 0 auto;">
-        <h4>💡 안내</h4>
-        <p>글을 작성하거나 프로젝트를 등록하려면 GitHub 저장소의 Discussions 탭으로 이동하세요. 카테고리를 선택하고 글을 남기면 피드에 자동으로 동기화됩니다.</p>
-        
-        <div style="text-align: center; margin-top: 30px;">
-          <a href="https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/discussions/new/choose" target="_blank" rel="noopener" class="btn" style="font-size: 16px; padding: 12px 24px;">
-            GitHub Discussions에서 작성하기
-          </a>
-        </div>
+    <div class="submit-container">
+      <div class="submit-header">
+        <h2 class="submit-title">새 프로젝트 등록</h2>
+        <p class="submit-subtitle">등록한 프로젝트는 Projects 카테고리에 자동으로 생성됩니다.</p>
       </div>
+
+      <form id="submission-form" onsubmit="return false;">
+        <div class="form-group">
+          <label class="form-label" for="proj-name">프로젝트 이름 (Title)</label>
+          <input type="text" class="form-control" id="proj-name" placeholder="멋진 프로젝트 이름을 적어주세요." required>
+        </div>
+
+        <div class="form-row" style="display:flex; gap:20px;">
+          <div class="form-group" style="flex:1;">
+            <label class="form-label" for="proj-tags">태그 (쉼표로 구분)</label>
+            <input type="text" class="form-control" id="proj-tags" placeholder="예: Web, AI, Game">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="proj-content">프로젝트 설명 (Markdown)</label>
+          <textarea class="form-control" id="proj-content" rows="10" placeholder="# 프로젝트 개요&#10;&#10;상세한 설명을 마크다운으로 작성해주세요." required></textarea>
+        </div>
+        
+        <button class="btn" id="submit-project-btn" style="width: 100%; height: 48px; font-size: 16px; margin-top:20px;">게시하기 (Create Discussion)</button>
+        <div id="submit-error" class="error-msg" style="margin-top:15px;"></div>
+      </form>
     </div>
   `;
+
+  document.getElementById('submit-project-btn').addEventListener('click', async () => {
+    const title = document.getElementById('proj-name').value.trim();
+    const tags = document.getElementById('proj-tags').value.trim();
+    const content = document.getElementById('proj-content').value.trim();
+    const errorDiv = document.getElementById('submit-error');
+    const btn = document.getElementById('submit-project-btn');
+    errorDiv.textContent = '';
+
+    if (!title || !content) {
+      errorDiv.textContent = "제목과 설명을 모두 입력해주세요.";
+      return;
+    }
+
+    if (!state.projectsCategory) {
+      errorDiv.textContent = "Projects 카테고리를 찾을 수 없습니다. GitHub 저장소에 'Projects' 카테고리가 있는지 확인하세요.";
+      return;
+    }
+
+    // Convert comma tags into #tags appended to body
+    let finalBody = content;
+    if (tags) {
+      const hashtagStr = tags.split(',').map(t => '#' + t.trim()).join(' ');
+      finalBody += `\n\n--- \n${hashtagStr}`;
+    }
+
+    try {
+      btn.textContent = "게시 중...";
+      btn.disabled = true;
+      const discussionNumber = await createDiscussion(state.projectsCategory.id, title, finalBody);
+      
+      // Clear feed cache to force refresh
+      state.projects = [];
+      alert("프로젝트가 등록되었습니다!");
+      window.location.hash = `#/project/${discussionNumber}`;
+    } catch (e) {
+      console.error(e);
+      errorDiv.textContent = "등록 실패: " + e.message;
+      btn.textContent = "게시하기 (Create Discussion)";
+      btn.disabled = false;
+    }
+  });
 }
 
 function renderVerificationPendingPage() {
