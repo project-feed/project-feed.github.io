@@ -5,11 +5,9 @@
 // Import Firebase initialized instances
 import { auth, db } from './config/firebase.js';
 import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut,
-  sendEmailVerification,
-  updateProfile
+  signInWithPopup,
+  GithubAuthProvider,
+  signOut
 } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js";
 
 import {
@@ -96,15 +94,96 @@ async function fetchJSON(path) {
   }
 }
 
+const GITHUB_REPO_OWNER = "project-feed";
+const GITHUB_REPO_NAME = "project-feed.github.io";
+
+async function fetchGraphQL(query, variables = {}) {
+  const token = localStorage.getItem("github_token");
+  if (!token) throw new Error("No GitHub token found. Please login.");
+
+  const response = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: {
+      "Authorization": `bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ query, variables })
+  });
+  
+  const result = await response.json();
+  if (result.errors) {
+    console.error("GraphQL Errors:", result.errors);
+    throw new Error(result.errors[0].message);
+  }
+  return result.data;
+}
+
 async function loadInitialData() {
   try {
-    state.projects = await fetchJSON("./projects/index.json");
+    // Fetch discussions from the repository
+    const query = `
+      query($owner: String!, $name: String!) {
+        repository(owner: $owner, name: $name) {
+          discussions(first: 50, orderBy: {field: CREATED_AT, direction: DESC}) {
+            nodes {
+              id
+              number
+              title
+              body
+              createdAt
+              updatedAt
+              author {
+                login
+                avatarUrl
+              }
+              category {
+                name
+              }
+              labels(first: 5) {
+                nodes {
+                  name
+                }
+              }
+              upvoteCount
+              comments {
+                totalCount
+              }
+            }
+          }
+        }
+      }
+    `;
+    const data = await fetchGraphQL(query, { owner: GITHUB_REPO_OWNER, name: GITHUB_REPO_NAME });
+    
+    // Transform Discussions into our project state format
+    const discussions = data.repository.discussions.nodes || [];
+    state.projects = discussions.map(d => {
+      return {
+        id: d.number.toString(), // Use issue/discussion number as ID
+        name: d.title,
+        description: d.body.substring(0, 150) + (d.body.length > 150 ? '...' : ''), // Preview
+        content: d.body,
+        category: d.category.name,
+        tags: d.labels.nodes.map(l => l.name),
+        author: d.author.login,
+        authorAvatar: d.author.avatarUrl,
+        createdAt: d.createdAt.split('T')[0],
+        updatedAt: d.updatedAt.split('T')[0],
+        stats: {
+          likes: d.upvoteCount,
+          views: 0, // Discussions API doesn't provide views directly
+          bookmarks: 0,
+          comments: d.comments.totalCount
+        }
+      };
+    });
   } catch (error) {
     appContainer.innerHTML = `
-      <div class="error-msg">
-        <h3>데이터베이스 로딩 실패</h3>
-        <p>프로젝트 데이터를 가져오는 데 실패했습니다. 로컬 서버(Live Server 등)를 사용하여 실행하고 있는지 확인해 주세요.</p>
-        <button class="btn" onclick="location.reload()" style="margin-top: 15px;">다시 시도</button>
+      <div class="error-msg" style="text-align: center; margin-top: 50px;">
+        <h3>데이터를 불러올 수 없습니다</h3>
+        <p>${error.message}</p>
+        <p>GitHub 로그인이 필요하거나 권한이 없습니다.</p>
+        <a href="#/login" class="btn" style="margin-top: 15px; display: inline-block;">로그인 페이지로 이동</a>
       </div>
     `;
     throw error;
@@ -180,11 +259,9 @@ async function router() {
     }
   }
 
-  // Block unverified users from accessing anything other than login/verification pending
-  if (state.currentUser && !state.currentUser.emailVerified) {
-    renderVerificationPendingPage();
-    return;
-  }
+  // Block unauthenticated users from seeing pages that might require auth? 
+  // For now, we will require auth for everything except feed if they have no token.
+  // Actually, wait until we implement GraphQL fetching.
 
   // Routing Matches
   if (routes.feed.test(hash)) {
@@ -230,7 +307,7 @@ function updateUserHeaderUI() {
     const username = (state.userProfile && state.userProfile.username) || nickname;
     const avatar = (state.userProfile && state.userProfile.avatar) || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop";
 
-    if (state.currentUser.emailVerified) {
+    if (state.currentUser) {
       container.innerHTML = `
         <div class="dropdown">
           <a href="#/user/${escapeHTML(username)}" class="user-menu-btn" id="header-profile-link">
@@ -247,21 +324,6 @@ function updateUserHeaderUI() {
         </div>
       `;
       // Update theme UI immediately for the new button
-      updateThemeUI(document.documentElement.getAttribute("data-theme") || "light");
-    } else {
-      // Logged in but NOT verified
-      container.innerHTML = `
-        <span style="font-size: 11px; color: var(--accent-color);">[Pending Verification]</span>
-        <div class="dropdown">
-          <button class="user-menu-btn">Menu</button>
-          <div class="dropdown-menu">
-            <button class="dropdown-item" id="theme-toggle-btn">
-              <span id="theme-icon">◇</span> <span id="theme-text">DARK</span>
-            </button>
-            <button class="dropdown-item" id="logout-btn">Logout</button>
-          </div>
-        </div>
-      `;
       updateThemeUI(document.documentElement.getAttribute("data-theme") || "light");
     }
 
@@ -290,6 +352,7 @@ function updateUserHeaderUI() {
 async function handleLogout() {
   try {
     await signOut(auth);
+    localStorage.removeItem("github_token");
     window.location.hash = "#/";
   } catch (e) {
     alert("로그아웃 실패: " + e.message);
@@ -304,18 +367,14 @@ auth.onAuthStateChanged(async (user) => {
   state.currentUser = user;
   
   if (user) {
-    if (user.emailVerified) {
-      const email = user.email || '';
-      const username = email.split('@')[0];
-      try {
-        const profile = await fetchJSON(`./users/${username}.json`);
-        state.userProfile = profile;
-      } catch (e) {
-        console.error('User profile JSON load failed:', e);
-        state.userProfile = null;
-      }
-    } else {
-      state.userProfile = null;
+    // Attempt to load profile if available, otherwise just use auth info
+    const username = (user.reloadUserInfo && user.reloadUserInfo.screenName) || user.email?.split('@')[0] || "user";
+    try {
+      const profile = await fetchJSON(`./users/${username}.json`).catch(() => null);
+      state.userProfile = profile || { username, avatar: user.photoURL };
+    } catch (e) {
+      console.error('User profile JSON load failed:', e);
+      state.userProfile = { username, avatar: user.photoURL };
     }
   } else {
     state.currentUser = null;
@@ -410,54 +469,37 @@ function renderFeedPage() {
 // 2. 로그인 페이지 렌더링
 function renderLoginPage() {
   appContainer.innerHTML = `
-    <div class="login-page">
+    <div class="login-page" style="text-align: center; max-width: 400px; margin: 60px auto;">
       <h2 class="login-title">로그인</h2>
-      <div class="form-group">
-        <label for="login-email">이메일</label>
-        <input type="email" id="login-email" class="form-control" placeholder="you@example.com" required />
-      </div>
-      <div class="form-group">
-        <label for="login-password">비밀번호</label>
-        <input type="password" id="login-password" class="form-control" placeholder="비밀번호" required />
-      </div>
-      <button class="btn" id="login-btn">로그인</button>
-      <div id="login-error" class="error-msg" style="margin-top:10px;"></div>
-      <div class="login-links" style="margin-top:15px;">
-        <a href="#/submit" class="nav-link">회원가입</a> |
-        <a href="#" id="reset-password-link" class="nav-link">비밀번호 재설정</a>
-      </div>
+      <p style="margin-bottom: 30px; font-size: 14px; color: var(--text-color); opacity: 0.8;">
+        Project-feed는 GitHub 연동을 통해서만 이용하실 수 있습니다.<br>
+        모든 프로젝트와 댓글은 GitHub Discussions에 동기화됩니다.
+      </p>
+      <button class="btn" id="github-login-btn" style="width: 100%; height: 48px; font-size: 16px;">
+        <svg height="20" viewBox="0 0 16 16" version="1.1" width="20" style="vertical-align: middle; margin-right: 10px;"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+        Login with GitHub
+      </button>
+      <div id="login-error" class="error-msg" style="margin-top:20px;"></div>
     </div>
   `;
 
-  // 로그인 버튼 이벤트
-  document.getElementById('login-btn').addEventListener('click', async () => {
-    const email = (document.getElementById('login-email').value || '').trim();
-    const password = document.getElementById('login-password').value;
+  document.getElementById('github-login-btn').addEventListener('click', async () => {
     const errorDiv = document.getElementById('login-error');
     errorDiv.textContent = '';
+    
+    const provider = new GithubAuthProvider();
+    provider.addScope('public_repo');
+    
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      // 로그인 성공 시 라우터 재실행 (auth 상태 리스너에서 자동 처리)
+      const result = await signInWithPopup(auth, provider);
+      const credential = GithubAuthProvider.credentialFromResult(result);
+      if (credential && credential.accessToken) {
+        localStorage.setItem("github_token", credential.accessToken);
+      }
       router();
     } catch (e) {
-      console.error('Login failed:', e);
+      console.error('GitHub Login failed:', e);
       errorDiv.textContent = '로그인 실패: ' + e.message;
-    }
-  });
-
-  // 비밀번호 재설정 링크 (Firebase 비밀번호 재설정 메일 발송)
-  document.getElementById('reset-password-link').addEventListener('click', async (e) => {
-    e.preventDefault();
-    const email = (document.getElementById('login-email').value || '').trim();
-    if (!email) {
-      alert('비밀번호 재설정을 위해 이메일을 입력해주세요.');
-      return;
-    }
-    try {
-      await auth.sendPasswordResetEmail(email);
-      alert('비밀번호 재설정 메일이 발송되었습니다.');
-    } catch (err) {
-      alert('메일 발송 실패: ' + err.message);
     }
   });
 }
@@ -626,7 +668,7 @@ function updateProjectsList() {
               </div>
               <div class="card-stats">
                 <span class="stat-item">⭐ ${(p.stats && p.stats.likes) || 0}</span>
-                <span class="stat-item">👁️ ${(p.stats && p.stats.views) || 0}</span>
+                <span class="stat-item">💬 ${(p.stats && p.stats.comments) || 0}</span>
               </div>
             </div>
             <div class="project-card-tags">
@@ -654,105 +696,92 @@ async function renderProjectDetailPage(projectId) {
   appContainer.innerHTML = `<div class="loading">Loading project detail [${escapeHTML(projectId)}]...</div>`;
 
   try {
-    const project = await fetchJSON(`./projects/${projectId}.json`);
-    
+    const project = state.projects.find(p => p.id === projectId);
+    if (!project) {
+      throw new Error("해당 프로젝트(Discussion)를 찾을 수 없습니다.");
+    }
+
+    // Fetch comments for this discussion
+    const commentsQuery = `
+      query($owner: String!, $name: String!, $number: Int!) {
+        repository(owner: $owner, name: $name) {
+          discussion(number: $number) {
+            comments(first: 20) {
+              nodes {
+                id
+                body
+                createdAt
+                author {
+                  login
+                  avatarUrl
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+    const data = await fetchGraphQL(commentsQuery, {
+      owner: GITHUB_REPO_OWNER,
+      name: GITHUB_REPO_NAME,
+      number: parseInt(projectId, 10)
+    });
+
+    const commentsNodes = data.repository.discussion.comments.nodes || [];
+    const commentsHTML = commentsNodes.map(c => `
+      <div style="border-bottom: 1px solid var(--border-color); padding: 10px 0; text-align: left;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
+          <img src="${escapeHTML(c.author.avatarUrl)}" width="20" height="20" style="border-radius:50%;">
+          <strong>${escapeHTML(c.author.login)}</strong>
+          <span style="font-size: 11px; opacity: 0.6;">${c.createdAt.split('T')[0]}</span>
+        </div>
+        <div style="font-size: 13px;">${safeMarkdown(c.body)}</div>
+      </div>
+    `).join("");
+
     appContainer.innerHTML = `
       <div class="back-btn-container">
         <a href="#/" class="btn">&larr; Back to Feed</a>
       </div>
 
       <div class="project-detail-layout">
-        <!-- Main Project Description -->
         <article class="project-main">
           <h1 class="project-detail-title">${escapeHTML(project.name)}</h1>
           
           <div class="project-detail-meta">
-            <span>Author: <a href="#/user/${escapeHTML(project.author)}">${escapeHTML(project.author)}</a></span>
+            <span>Author: <strong>${escapeHTML(project.author)}</strong></span>
             <span>Created: ${project.createdAt}</span>
-            ${project.updatedAt ? `<span>Updated: ${project.updatedAt}</span>` : ""}
             <span>Category: <strong>${escapeHTML(project.category)}</strong></span>
           </div>
 
-          <!-- Representative Image Banner if exists -->
-          ${project.image ? `
-            <div class="project-banner-container">
-              <img src="${escapeHTML(project.image)}" class="project-banner" alt="${escapeHTML(project.name)} Representative Image">
-            </div>
-          ` : ""}
-
-          <!-- Markdown Content Body -->
           <div class="project-content">
-            ${safeMarkdown(project.content || "상세 설명이 비어 있습니다.")}
+            ${safeMarkdown(project.content)}
           </div>
         </article>
 
-        <!-- Sidebar Actions & Stats Info -->
         <aside class="project-sidebar">
-          <!-- Quick Info -->
-          <div class="info-card">
-            <h4 class="info-card-title">Project Info</h4>
-            <div class="info-grid">
-              <div class="info-row">
-                <span class="info-label">License</span>
-                <span class="info-value">${escapeHTML(project.license || "None")}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Views</span>
-                <span class="info-value">${(project.stats && project.stats.views) || 0}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Likes</span>
-                <span class="info-value">${(project.stats && project.stats.likes) || 0}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Bookmarks</span>
-                <span class="info-value">${(project.stats && project.stats.bookmarks) || 0}</span>
-              </div>
-            </div>
-
-            <div class="action-buttons">
-              ${project.githubLink ? `
-                <a href="${escapeHTML(project.githubLink)}" target="_blank" rel="noopener" class="btn">GitHub Repository</a>
-              ` : ""}
-              ${project.websiteLink ? `
-                <a href="${escapeHTML(project.websiteLink)}" target="_blank" rel="noopener" class="btn">Visit Website</a>
-              ` : ""}
-            </div>
-          </div>
-
-          <!-- Interactions Panel (Placeholder for Phase 3 Firebase integrations) -->
           <div class="info-card">
             <h4 class="info-card-title">Interactions</h4>
             <div class="interact-panel">
-              <button class="interact-btn" id="like-btn">⭐ Like (${(project.stats && project.stats.likes) || 0})</button>
-              <button class="interact-btn" id="bookmark-btn">🔖 Save</button>
+              <a href="https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/discussions/${project.id}" target="_blank" rel="noopener" class="btn" style="width:100%; text-align:center; margin-bottom: 10px;">
+                View on GitHub (Like/Comment)
+              </a>
             </div>
             
-            <!-- Comments section placeholder -->
             <div style="margin-top: 20px; font-size: 12px; border-top: 1px dashed var(--border-color); padding-top: 15px;">
-              <h5 style="font-weight: 800; margin-bottom: 10px;">Comments (${(project.stats && project.stats.comments) || 0})</h5>
-              <div style="border: 2px dashed var(--border-color); padding: 10px; text-align: center; opacity: 0.7;">
-                로그인 후 댓글을 작성할 수 있습니다 (2단계 예정).
-              </div>
+              <h5 style="font-weight: 800; margin-bottom: 10px;">Comments (${project.stats.comments})</h5>
+              ${commentsHTML || '<div style="opacity:0.6; text-align:center;">댓글이 없습니다.</div>'}
             </div>
           </div>
         </aside>
       </div>
     `;
 
-    // Simple interaction clicks feedback (Phase 1 local visual feedback only)
-    document.getElementById("like-btn").addEventListener("click", () => {
-      alert("로그인이 필요합니다. (2단계 구현 예정)");
-    });
-    document.getElementById("bookmark-btn").addEventListener("click", () => {
-      alert("로그인이 필요합니다. (2단계 구현 예정)");
-    });
-
   } catch (error) {
     appContainer.innerHTML = `
       <div class="error-msg">
         <h3>프로젝트 상세 정보 로드 실패</h3>
-        <p>프로젝트 데이터를 가져오는 데 실패했습니다. 파일이 존재하는지 확인해 주세요.</p>
+        <p>${error.message}</p>
         <a href="#/" class="btn" style="margin-top: 15px; display: inline-block;">피드로 돌아가기</a>
       </div>
     `;
@@ -764,10 +793,11 @@ async function renderUserProfilePage(username) {
   appContainer.innerHTML = `<div class="loading">Loading user profile [${escapeHTML(username)}]...</div>`;
 
   try {
-    const user = await fetchJSON(`./users/${username}.json`);
-    
     // Find all projects created by this user
     const userProjects = state.projects.filter(p => p.author === username);
+    
+    // We don't have a backend users db anymore, so we build a simple profile
+    const avatarUrl = userProjects.length > 0 ? userProjects[0].authorAvatar : `https://github.com/${username}.png`;
 
     appContainer.innerHTML = `
       <div class="back-btn-container">
@@ -775,30 +805,26 @@ async function renderUserProfilePage(username) {
       </div>
 
       <div class="profile-header-card">
-        <img src="${escapeHTML(user.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop')}" class="profile-avatar" alt="${escapeHTML(user.nickname)} Avatar">
+        <img src="${escapeHTML(avatarUrl)}" class="profile-avatar" alt="${escapeHTML(username)} Avatar">
         <div class="profile-details">
-          <h2 class="profile-name">${escapeHTML(user.nickname)}</h2>
-          <div class="profile-username">@${escapeHTML(user.username)}</div>
-          <p class="profile-bio">${escapeHTML(user.bio || "소개가 없습니다.")}</p>
+          <h2 class="profile-name">${escapeHTML(username)}</h2>
+          <div class="profile-username">@${escapeHTML(username)}</div>
+          <p class="profile-bio">GitHub User</p>
           <div class="profile-meta">
-            Joined: ${user.joinedAt} · Projects Published: ${userProjects.length}
+            Discussions Published: ${userProjects.length}
           </div>
         </div>
       </div>
 
       <div class="profile-projects-section">
-        <h3 class="profile-projects-title">Projects by ${escapeHTML(user.nickname)}</h3>
+        <h3 class="profile-projects-title">Discussions by @${escapeHTML(username)}</h3>
         <div class="projects-grid">
           ${userProjects.length === 0 ? `
             <div style="border: 2px dashed var(--border-color); padding: 40px; text-align: center; font-weight: 700;">
-              등록된 프로젝트가 없습니다.
+              작성한 글(Discussion)이 없습니다.
             </div>
           ` : userProjects.map(p => {
-            const imageHTML = p.image ? `
-              <div class="project-card-image-wrapper">
-                <img src="${escapeHTML(p.image)}" class="project-card-img" alt="${escapeHTML(p.name)} Thumbnail">
-              </div>
-            ` : `
+            const imageHTML = `
               <div class="project-card-image-wrapper">
                 <div class="project-card-placeholder">
                   <span>◇</span>
@@ -824,7 +850,7 @@ async function renderUserProfilePage(username) {
                       </div>
                       <div class="card-stats">
                         <span class="stat-item">⭐ ${(p.stats && p.stats.likes) || 0}</span>
-                        <span class="stat-item">👁️ ${(p.stats && p.stats.views) || 0}</span>
+                        <span class="stat-item">💬 ${(p.stats && p.stats.comments) || 0}</span>
                       </div>
                     </div>
                     <div class="project-card-tags">
@@ -843,7 +869,7 @@ async function renderUserProfilePage(username) {
     appContainer.innerHTML = `
       <div class="error-msg">
         <h3>사용자 프로필 로드 실패</h3>
-        <p>프로필 정보를 불러오는 데 실패했습니다. 파일이 존재하는지 확인해 주세요.</p>
+        <p>${error.message}</p>
         <a href="#/" class="btn" style="margin-top: 15px; display: inline-block;">피드로 돌아가기</a>
       </div>
     `;
@@ -853,211 +879,32 @@ async function renderUserProfilePage(username) {
 // 4. Project Upload Guide / Submission Form Page
 function renderSubmitPage() {
   appContainer.innerHTML = `
-    <div class="submit-container">
-      <div class="submit-header">
-        <h2 class="submit-title">Submit Project</h2>
-        <p class="submit-subtitle">"모든 것은 파일이다" — 깃허브 저장소에 데이터를 등록하여 공유하세요.</p>
-      </div>
-
-      <div class="guide-box">
-        <h4>💡 등록 방법 안내</h4>
-        <ol>
-          <li>아래 폼에 프로젝트 정보를 채웁니다.</li>
-          <li>하단에 생성된 <strong>JSON 파일 소스 코드</strong>를 복사합니다.</li>
-          <li>로컬 저장소의 <code>/projects/{project-id}.json</code>에 저장합니다.</li>
-          <li><code>/projects/index.json</code> 리스트 최상단에 프로젝트 요약 정보를 추가합니다.</li>
-          <li>레포지토리에 커밋 후 푸시하면 GitHub Pages에 실시간으로 반영됩니다!</li>
-        </ol>
-      </div>
-
-      <form id="submission-form" onsubmit="return false;">
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label" for="proj-id">Project ID (Unique 영문/숫자)</label>
-            <input type="text" class="form-control" id="proj-id" placeholder="예: my-awesome-tool" required>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="proj-name">Project Name</label>
-            <input type="text" class="form-control" id="proj-name" placeholder="프로젝트명 입력" required>
-          </div>
+    <div class="submit-container" style="text-align: center; margin-top: 50px;">
+      <h2 class="submit-title">새 글 쓰기</h2>
+      <p class="submit-subtitle" style="margin-bottom: 30px;">
+        모든 프로젝트와 글은 GitHub Discussions로 관리됩니다.
+      </p>
+      
+      <div class="guide-box" style="text-align: left; max-width: 600px; margin: 0 auto;">
+        <h4>💡 안내</h4>
+        <p>글을 작성하거나 프로젝트를 등록하려면 GitHub 저장소의 Discussions 탭으로 이동하세요. 카테고리를 선택하고 글을 남기면 피드에 자동으로 동기화됩니다.</p>
+        
+        <div style="text-align: center; margin-top: 30px;">
+          <a href="https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/discussions/new/choose" target="_blank" rel="noopener" class="btn" style="font-size: 16px; padding: 12px 24px;">
+            GitHub Discussions에서 작성하기
+          </a>
         </div>
-
-        <div class="form-group">
-          <label class="form-label" for="proj-desc">Short Description (한 줄 요약)</label>
-          <input type="text" class="form-control" id="proj-desc" placeholder="리스트에 보여줄 한 줄 요약을 입력하세요." required>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label" for="proj-category">Category</label>
-            <select class="form-control" id="proj-category" required>
-              <option value="Web">Web</option>
-              <option value="Mobile">Mobile</option>
-              <option value="AI">AI</option>
-              <option value="Game">Game</option>
-              <option value="Library">Library</option>
-              <option value="Tool">Tool</option>
-              <option value="Hardware">Hardware</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="proj-tags">Tags (쉼표로 구분)</label>
-            <input type="text" class="form-control" id="proj-tags" placeholder="예: web, game, canvas">
-          </div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label" for="proj-author">Author (GitHub ID)</label>
-            <input type="text" class="form-control" id="proj-author" placeholder="작성자 명칭" value="hj" required>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="proj-license">License</label>
-            <input type="text" class="form-control" id="proj-license" placeholder="예: MIT, Apache-2.0" value="MIT" required>
-          </div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label" for="proj-github">GitHub Repo Link (선택)</label>
-            <input type="url" class="form-control" id="proj-github" placeholder="https://github.com/username/repo">
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="proj-web">Website Link (선택)</label>
-            <input type="url" class="form-control" id="proj-web" placeholder="https://username.github.io/repo">
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="proj-image">Representative Image Path (대표 이미지, 선택)</label>
-          <input type="text" class="form-control" id="proj-image" placeholder="예: assets/my-project-preview.png">
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="proj-content">Markdown Description (상세 설명, Markdown 지원)</label>
-          <textarea class="form-control" id="proj-content" placeholder="# 내 프로젝트 설명&#10;&#10;마크다운 형식을 자유롭게 기입하여 설명을 완성하세요." required></textarea>
-        </div>
-      </form>
-
-      <div class="generator-output">
-        <h3 class="generator-output-title">📋 1. 생성된 Project Detail JSON</h3>
-        <p style="font-size: 11px; color: var(--accent-color); margin-bottom: 8px;">복사해서 <code>/projects/{project-id}.json</code> 경로에 새 파일로 생성하세요.</p>
-        <div class="code-wrapper">
-          <textarea class="code-box" id="detail-json-box" readonly>JSON 파일 정보가 여기에 실시간으로 표시됩니다...</textarea>
-        </div>
-        <button class="btn" id="copy-detail-btn">Copy Detail JSON</button>
-      </div>
-
-      <div class="generator-output" style="margin-top: 20px;">
-        <h3 class="generator-output-title">📋 2. 생성된 index.json 추가 엔트리</h3>
-        <p style="font-size: 11px; color: var(--accent-color); margin-bottom: 8px;">복사해서 <code>/projects/index.json</code> 배열의 최상단(첫 번째 원소)으로 병합하세요.</p>
-        <div class="code-wrapper">
-          <textarea class="code-box" id="index-json-box" style="height: 120px;" readonly>index.json 용 요약 데이터가 실시간으로 표시됩니다...</textarea>
-        </div>
-        <button class="btn" id="copy-index-btn">Copy Index Entry</button>
       </div>
     </div>
   `;
-
-  // Attach change listeners to form to update JSON previews live
-  const formFields = [
-    "proj-id", "proj-name", "proj-desc", "proj-category",
-    "proj-tags", "proj-author", "proj-license", "proj-github",
-    "proj-web", "proj-image", "proj-content"
-  ];
-
-  formFields.forEach(id => {
-    document.getElementById(id).addEventListener("input", updateGeneratedJSON);
-  });
-
-  document.getElementById("copy-detail-btn").addEventListener("click", () => {
-    const box = document.getElementById("detail-json-box");
-    box.select();
-    document.execCommand("copy");
-    alert("Project Detail JSON이 클립보드에 복사되었습니다!");
-  });
-
-  document.getElementById("copy-index-btn").addEventListener("click", () => {
-    const box = document.getElementById("index-json-box");
-    box.select();
-    document.execCommand("copy");
-    alert("Index Entry가 클립보드에 복사되었습니다!");
-  });
-
-  // Run initial generator call
-  updateGeneratedJSON();
-}
-
-function updateGeneratedJSON() {
-  const projId = document.getElementById("proj-id").value.trim() || "untitled-project";
-  const projName = document.getElementById("proj-name").value.trim() || "Untitled Project";
-  const projDesc = document.getElementById("proj-desc").value.trim() || "프로젝트 한 줄 설명";
-  const projCategory = document.getElementById("proj-category").value;
-  const rawTags = document.getElementById("proj-tags").value;
-  const projAuthor = document.getElementById("proj-author").value.trim() || "anonymous";
-  const projLicense = document.getElementById("proj-license").value.trim() || "MIT";
-  const projGithub = document.getElementById("proj-github").value.trim() || "";
-  const projWeb = document.getElementById("proj-web").value.trim() || "";
-  const projImage = document.getElementById("proj-image").value.trim() || "";
-  const projContent = document.getElementById("proj-content").value || "# " + projName + "\n\n설명이 비어 있습니다.";
-
-  // Split tags by comma and trim whitespace
-  const tags = rawTags ? rawTags.split(",").map(t => t.trim()).filter(t => t.length > 0) : [];
-  const currentDate = new Date().toISOString().split('T')[0];
-
-  // 1. Detail JSON structure
-  const detailObj = {
-    id: projId,
-    name: projName,
-    description: projDesc,
-    author: projAuthor,
-    createdAt: currentDate,
-    updatedAt: currentDate,
-    tags: tags,
-    category: projCategory,
-    license: projLicense,
-    githubLink: projGithub,
-    websiteLink: projWeb,
-    image: projImage || undefined,
-    stats: {
-      likes: 0,
-      views: 0,
-      comments: 0,
-      bookmarks: 0
-    },
-    content: projContent
-  };
-
-  // 2. Index Entry JSON structure
-  const indexObj = {
-    id: projId,
-    name: projName,
-    description: projDesc,
-    author: projAuthor,
-    createdAt: currentDate,
-    tags: tags,
-    category: projCategory,
-    stats: {
-      likes: 0,
-      views: 0,
-      comments: 0,
-      bookmarks: 0
-    }
-  };
-
-  const detailBox = document.getElementById("detail-json-box");
-  const indexBox = document.getElementById("index-json-box");
-
-  if (detailBox) detailBox.value = JSON.stringify(detailObj, null, 2);
-  if (indexBox) indexBox.value = JSON.stringify(indexObj, null, 2) + ",";
 }
 
 function renderVerificationPendingPage() {
   appContainer.innerHTML = `
     <div class="error-msg">
-      <h3>이메일 인증 대기 중</h3>
-      <p>이메일 인증을 완료해야 서비스를 이용할 수 있습니다. 가입하신 이메일의 메일함을 확인해 주세요.</p>
-      <button class="btn" onclick="location.reload()" style="margin-top: 15px;">새로고침 (인증 확인)</button>
+      <h3>권한 대기 중</h3>
+      <p>현재 계정 상태를 확인하고 있습니다. 잠시 후 다시 시도해주세요.</p>
+      <button class="btn" onclick="location.reload()" style="margin-top: 15px;">새로고침</button>
     </div>
   `;
 }
